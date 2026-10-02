@@ -22,7 +22,10 @@ export default function LoginPage() {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "로그인에 실패했습니다.");
-      router.replace("/admin/cbgc/dashboard");
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/admin/cbgc/dashboard";
+      router.replace(destination);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인에 실패했습니다.");
