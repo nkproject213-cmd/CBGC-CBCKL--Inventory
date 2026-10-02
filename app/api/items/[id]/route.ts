@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { del } from "@vercel/blob";
 import { isAdmin } from "@/lib/auth";
 import { deleteItem, getItem, updateItem } from "@/lib/db";
-import { deleteImageByUrl } from "@/lib/storage";
 import { itemSchema } from "@/lib/validation";
 
 function errorResponse(error: unknown) {
@@ -26,11 +26,17 @@ export async function GET(
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   }
+
   const { id } = await params;
   const item = await getItem(id);
+
   if (!item) {
-    return NextResponse.json({ error: "물품을 찾을 수 없습니다." }, { status: 404 });
+    return NextResponse.json(
+      { error: "물품을 찾을 수 없습니다." },
+      { status: 404 }
+    );
   }
+
   return NextResponse.json({ item });
 }
 
@@ -45,15 +51,23 @@ export async function PATCH(
   try {
     const { id } = await params;
     const before = await getItem(id);
+
     if (!before) {
-      return NextResponse.json({ error: "물품을 찾을 수 없습니다." }, { status: 404 });
+      return NextResponse.json(
+        { error: "물품을 찾을 수 없습니다." },
+        { status: 404 }
+      );
     }
 
     const data = itemSchema.parse(await request.json());
     const item = await updateItem(id, { ...data } as never);
 
-    if (before.photo_url && before.photo_url !== item?.photo_url) {
-      deleteImageByUrl(before.photo_url).catch(console.error);
+    if (
+      before.photo_url &&
+      before.photo_url !== item?.photo_url &&
+      before.photo_url.includes("blob.vercel-storage.com")
+    ) {
+      del(before.photo_url).catch(console.error);
     }
 
     return NextResponse.json({ item });
@@ -73,11 +87,18 @@ export async function DELETE(
   try {
     const { id } = await params;
     const deleted = await deleteItem(id);
+
     if (!deleted) {
-      return NextResponse.json({ error: "물품을 찾을 수 없습니다." }, { status: 404 });
+      return NextResponse.json(
+        { error: "물품을 찾을 수 없습니다." },
+        { status: 404 }
+      );
     }
 
-    deleteImageByUrl(deleted.photo_url).catch(console.error);
+    if (deleted.photo_url?.includes("blob.vercel-storage.com")) {
+      del(deleted.photo_url).catch(console.error);
+    }
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     return errorResponse(error);
