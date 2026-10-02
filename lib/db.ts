@@ -2,10 +2,58 @@ import "server-only";
 import { neon } from "@neondatabase/serverless";
 import type { InventoryItem, Organization, PublicInventoryItem } from "@/lib/types";
 
+type SqlClient = ReturnType<typeof neon>;
+
+let schemaReady: Promise<void> | null = null;
+
 function sqlClient() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL 환경변수가 설정되지 않았습니다.");
   return neon(url);
+}
+
+async function ensureSchema(sql: SqlClient) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS inventory_items (
+          id UUID PRIMARY KEY,
+          public_id UUID NOT NULL UNIQUE,
+          organization VARCHAR(10) NOT NULL CHECK (organization IN ('CBGC', 'CBCKL')),
+          manager_main TEXT,
+          manager_sub TEXT,
+          management_no TEXT NOT NULL,
+          item_type TEXT NOT NULL,
+          acquired_date DATE,
+          item_name TEXT NOT NULL,
+          purchase_price BIGINT,
+          useful_life_years INTEGER,
+          storage_location TEXT,
+          accessories TEXT,
+          specification TEXT,
+          classification_no TEXT,
+          identification_no TEXT,
+          photo_url TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT inventory_items_organization_management_no_key
+            UNIQUE (organization, management_no)
+        )
+      `;
+
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_inventory_items_org
+        ON inventory_items (organization)
+      `;
+
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_inventory_items_name
+        ON inventory_items (item_name)
+      `;
+    })();
+  }
+
+  await schemaReady;
 }
 
 function normalizeRows<T>(rows: unknown): T[] {
@@ -14,6 +62,8 @@ function normalizeRows<T>(rows: unknown): T[] {
 
 export async function listItems(org: Organization, q = "", type = "") {
   const sql = sqlClient();
+  await ensureSchema(sql);
+
   const query = `%${q.trim()}%`;
   const rows = await sql`
     SELECT * FROM inventory_items
@@ -35,12 +85,16 @@ export async function listItems(org: Organization, q = "", type = "") {
 
 export async function getItem(id: string) {
   const sql = sqlClient();
+  await ensureSchema(sql);
+
   const rows = await sql`SELECT * FROM inventory_items WHERE id = ${id} LIMIT 1`;
   return normalizeRows<InventoryItem>(rows)[0] ?? null;
 }
 
 export async function getPublicItem(publicId: string) {
   const sql = sqlClient();
+  await ensureSchema(sql);
+
   const rows = await sql`
     SELECT
       public_id, organization, manager_main, manager_sub, management_no,
@@ -52,8 +106,12 @@ export async function getPublicItem(publicId: string) {
   return normalizeRows<PublicInventoryItem>(rows)[0] ?? null;
 }
 
-export async function createItem(data: Omit<InventoryItem, "id" | "public_id" | "created_at" | "updated_at">) {
+export async function createItem(
+  data: Omit<InventoryItem, "id" | "public_id" | "created_at" | "updated_at">
+) {
   const sql = sqlClient();
+  await ensureSchema(sql);
+
   const id = crypto.randomUUID();
   const publicId = crypto.randomUUID();
   const rows = await sql`
@@ -73,8 +131,13 @@ export async function createItem(data: Omit<InventoryItem, "id" | "public_id" | 
   return normalizeRows<InventoryItem>(rows)[0];
 }
 
-export async function updateItem(id: string, data: Omit<InventoryItem, "id" | "public_id" | "created_at" | "updated_at">) {
+export async function updateItem(
+  id: string,
+  data: Omit<InventoryItem, "id" | "public_id" | "created_at" | "updated_at">
+) {
   const sql = sqlClient();
+  await ensureSchema(sql);
+
   const rows = await sql`
     UPDATE inventory_items SET
       organization = ${data.organization},
@@ -101,6 +164,8 @@ export async function updateItem(id: string, data: Omit<InventoryItem, "id" | "p
 
 export async function deleteItem(id: string) {
   const sql = sqlClient();
+  await ensureSchema(sql);
+
   const rows = await sql`DELETE FROM inventory_items WHERE id = ${id} RETURNING *`;
   return normalizeRows<InventoryItem>(rows)[0] ?? null;
 }
