@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Plus, Download, LogOut, Pencil, QrCode, ExternalLink, Trash2, X, Printer, Copy } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
 
@@ -24,6 +24,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [form, setForm] = useState<Form>(emptyForm(org));
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const autoEditDone = useRef(false);
 
   const colors = org === "CBGC" ? { primary: "#00a8a8", dark: "#008c8c" } : { primary: "#ea5b96", dark: "#cf3d7d" };
   const base = `/admin/${org.toLowerCase()}`;
@@ -42,6 +43,16 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [org, search, type]);
   useEffect(() => { setForm(emptyForm(org)); }, [org]);
+  useEffect(() => {
+    if (autoEditDone.current || loading) return;
+    const publicId = new URLSearchParams(window.location.search).get("edit");
+    if (!publicId) { autoEditDone.current = true; return; }
+    const target = items.find((item) => item.public_id === publicId);
+    if (target) {
+      autoEditDone.current = true;
+      openEdit(target);
+    }
+  }, [items, loading]);
 
   const allTypes = useMemo(() => [...new Set(items.map((i) => i.item_type))].sort(), [items]);
   const locations = useMemo(() => new Set(items.map((i) => i.storage_location).filter(Boolean)).size, [items]);
