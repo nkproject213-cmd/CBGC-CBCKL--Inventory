@@ -2,8 +2,6 @@ import "server-only";
 import { neon } from "@neondatabase/serverless";
 import type { InventoryItem, Organization, PublicInventoryItem } from "@/lib/types";
 
-type SqlClient = ReturnType<typeof neon>;
-
 let schemaReady: Promise<void> | null = null;
 
 function sqlClient() {
@@ -11,6 +9,8 @@ function sqlClient() {
   if (!url) throw new Error("DATABASE_URL 환경변수가 설정되지 않았습니다.");
   return neon(url);
 }
+
+type SqlClient = ReturnType<typeof sqlClient>;
 
 async function ensureSchema(sql: SqlClient) {
   if (!schemaReady) {
