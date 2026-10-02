@@ -13,10 +13,14 @@ export async function GET(
     const object = await getImage(objectKey);
 
     if (!object.Body) {
-      return NextResponse.json({ error: "이미지를 찾을 수 없습니다." }, { status: 404 });
+      return NextResponse.json(
+        { error: "이미지를 찾을 수 없습니다." },
+        { status: 404 }
+      );
     }
 
-    const body = await object.Body.transformToByteArray();
+    const bytes = await object.Body.transformToByteArray();
+    const body = Buffer.from(bytes);
 
     return new NextResponse(body, {
       headers: {
@@ -26,6 +30,9 @@ export async function GET(
     });
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: "이미지를 찾을 수 없습니다." }, { status: 404 });
+    return NextResponse.json(
+      { error: "이미지를 찾을 수 없습니다." },
+      { status: 404 }
+    );
   }
 }
