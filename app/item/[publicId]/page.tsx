@@ -1,6 +1,8 @@
 import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicItem } from "@/lib/db";
+import { isAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +10,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ pub
   const { publicId } = await params;
   const item = await getPublicItem(publicId);
   if (!item) notFound();
+  const admin = await isAdmin();
   const color = item.organization === "CBGC" ? "#00a8a8" : "#ea5b96";
   const dark = item.organization === "CBGC" ? "#008c8c" : "#cf3d7d";
   const rows = [
@@ -27,6 +30,13 @@ export default async function PublicItemPage({ params }: { params: Promise<{ pub
             {rows.map(([label, value]) => <div className="info-row" key={label}><b>{label}</b><span>{value || "-"}</span></div>)}
           </div>
         </section>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 16 }}>
+          {admin ? (
+            <Link className="btn primary" href={`/admin/${item.organization.toLowerCase()}/items?edit=${item.public_id}`}>이 물품 수정</Link>
+          ) : (
+            <Link className="btn" href={`/admin/login?next=${encodeURIComponent(`/item/${publicId}`)}`}>관리자 로그인</Link>
+          )}
+        </div>
         <footer className="public-foot">{item.organization} 물품관리 시스템</footer>
       </div>
     </main>
