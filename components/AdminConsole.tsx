@@ -150,7 +150,13 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
           </>}
 
           {section === "qr" && <>
-            <div className="page-head"><div><h2>{title}</h2><p>물품별 공개페이지 QR을 확인·다운로드·인쇄할 수 있습니다.</p></div></div>
+            <div className="page-head">
+              <div><h2>{title}</h2><p>물품별 공개페이지 QR을 확인하고, 전체 QR을 라벨지 또는 이미지 파일로 일괄 출력할 수 있습니다.</p></div>
+              <div className="actions">
+                <a className="btn" href={`/api/qr-batch?org=${org}&mode=labels`} target="_blank" rel="noreferrer"><Printer size={15}/> 40칸 라벨 인쇄 / PDF</a>
+                <a className="btn primary" href={`/api/qr-batch?org=${org}&mode=zip`}><Download size={15}/> 전체 QR ZIP</a>
+              </div>
+            </div>
             {loading ? <div className="card empty">불러오는 중...</div> : items.length===0 ? <div className="card empty">등록된 물품이 없습니다.</div> : <div className="qr-grid">{items.map(i=><div className="card qr-card" key={i.id}><Image src={`/api/qr/${i.public_id}`} alt={`${i.management_no} QR`} width={112} height={112} unoptimized/><div className="meta"><strong>{i.item_name}</strong><span>{i.management_no}</span><span>{i.storage_location || "보관장소 미입력"}</span><div className="actions" style={{marginTop:9}}><a className="btn small" href={`/api/qr/${i.public_id}`} download={`${i.organization}-${i.management_no}-QR.png`}><Download size={13}/> QR 다운로드</a><button className="btn small" onClick={()=>printQr(i)}><Printer size={13}/> 인쇄</button><button className="btn small" onClick={()=>copyPublicUrl(i)}><Copy size={13}/> URL 복사</button><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개보기</a></div></div></div>)}</div>}
           </>}
         </div>
