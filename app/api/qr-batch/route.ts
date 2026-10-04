@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
       );
 
       const buffer = await zip.generateAsync({
-        type: "uint8array",
+        type: "arraybuffer",
         compression: "DEFLATE",
         compressionOptions: { level: 6 },
       });
