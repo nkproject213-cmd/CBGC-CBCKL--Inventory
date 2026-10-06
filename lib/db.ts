@@ -50,6 +50,15 @@ async function ensureSchema(sql: SqlClient) {
         CREATE INDEX IF NOT EXISTS idx_inventory_items_name
         ON inventory_items (item_name)
       `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS inventory_settings (
+          organization VARCHAR(10) PRIMARY KEY CHECK (organization IN ('CBGC', 'CBCKL')),
+          label_image_url TEXT,
+          label_image_scale INTEGER NOT NULL DEFAULT 80 CHECK (label_image_scale BETWEEN 20 AND 100),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
     })();
   }
 
@@ -168,4 +177,58 @@ export async function deleteItem(id: string) {
 
   const rows = await sql`DELETE FROM inventory_items WHERE id = ${id} RETURNING *`;
   return normalizeRows<InventoryItem>(rows)[0] ?? null;
+}
+
+
+export async function getLabelSettings(org: Organization) {
+  const sql = sqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`
+    SELECT organization, label_image_url, label_image_scale, updated_at
+    FROM inventory_settings
+    WHERE organization = ${org}
+    LIMIT 1
+  `;
+
+  return normalizeRows<{
+    organization: Organization;
+    label_image_url: string | null;
+    label_image_scale: number;
+    updated_at: string;
+  }>(rows)[0] ?? {
+    organization: org,
+    label_image_url: null,
+    label_image_scale: 80,
+    updated_at: new Date(0).toISOString(),
+  };
+}
+
+export async function saveLabelSettings(
+  org: Organization,
+  labelImageUrl: string | null,
+  labelImageScale: number
+) {
+  const sql = sqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`
+    INSERT INTO inventory_settings (
+      organization, label_image_url, label_image_scale, updated_at
+    ) VALUES (
+      ${org}, ${labelImageUrl}, ${labelImageScale}, NOW()
+    )
+    ON CONFLICT (organization) DO UPDATE SET
+      label_image_url = EXCLUDED.label_image_url,
+      label_image_scale = EXCLUDED.label_image_scale,
+      updated_at = NOW()
+    RETURNING organization, label_image_url, label_image_scale, updated_at
+  `;
+
+  return normalizeRows<{
+    organization: Organization;
+    label_image_url: string | null;
+    label_image_scale: number;
+    updated_at: string;
+  }>(rows)[0];
 }
