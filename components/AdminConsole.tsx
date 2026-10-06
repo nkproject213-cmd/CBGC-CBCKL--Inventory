@@ -276,7 +276,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
           {section === "items" && <>
             <div className="page-head">
               <div><h2>{title}</h2><p>물품의 모든 내부 정보를 조회·수정하고 공개 QR 페이지를 관리합니다.</p></div>
-              <div className="actions" style={{alignItems:"flex-end"}}>
+              <div className="actions" style={{alignItems:"flex-start",gap:8}}>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   <div className="actions">
                     <input className="input" style={{width:125}} placeholder="책임자(정)" value={bulkManagerMain} onChange={(e)=>setBulkManagerMain(e.target.value)}/>
