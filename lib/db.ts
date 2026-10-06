@@ -270,3 +270,17 @@ export async function updateManagersForOrg(
 
   return normalizeRows<{ id: string }>(rows).length;
 }
+
+
+export async function deleteItemsForOrg(org: Organization) {
+  const sql = sqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`
+    DELETE FROM inventory_items
+    WHERE organization = ${org}
+    RETURNING id
+  `;
+
+  return normalizeRows<{ id: string }>(rows).length;
+}

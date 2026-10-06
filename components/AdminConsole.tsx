@@ -33,6 +33,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [bulkManagerSub, setBulkManagerSub] = useState("");
   const [bulkManagerSaving, setBulkManagerSaving] = useState(false);
   const [excelUploading, setExcelUploading] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const autoEditDone = useRef(false);
 
@@ -228,6 +229,41 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     }
   }
 
+  async function deleteAllItems() {
+    if (!items.length) {
+      alert("삭제할 물품이 없습니다.");
+      return;
+    }
+
+    if (!confirm(`현재 ${org} 물품 ${items.length}건을 전부 삭제합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`)) {
+      return;
+    }
+
+    const expected = `${org} 전체삭제`;
+    const confirmation = prompt(`최종 확인을 위해 아래 문구를 정확히 입력해 주세요.\n\n${expected}`);
+    if (confirmation !== expected) {
+      if (confirmation !== null) alert("확인 문구가 일치하지 않아 삭제하지 않았습니다.");
+      return;
+    }
+
+    setDeletingAll(true);
+    try {
+      const res = await fetch("/api/items/bulk-delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organization: org, confirmation }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "전체삭제 실패");
+      alert(`${org} 물품 ${body.deleted || 0}건을 삭제했습니다.`);
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "전체삭제에 실패했습니다.");
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   async function logout() { await fetch("/api/auth/logout", { method:"POST" }); location.href="/admin/login"; }
   function excel() { const p = new URLSearchParams({ org }); if(search)p.set("q",search); if(type)p.set("type",type); location.href=`/api/export?${p}`; }
   async function copyPublicUrl(i: InventoryItem) {
@@ -288,7 +324,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
                 <button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button>
               </div>
             </div>
-            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} /></div>
+            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><button className="btn danger" disabled={deletingAll || loading || items.length===0} onClick={deleteAllItems}><Trash2 size={15}/>{deletingAll?" 삭제 중...":" 전체삭제"}</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} /></div>
           </>}
 
           {section === "qr" && <>
