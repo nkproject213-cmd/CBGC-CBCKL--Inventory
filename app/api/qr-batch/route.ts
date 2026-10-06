@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import JSZip from "jszip";
 import { isAdmin } from "@/lib/auth";
-import { listItems } from "@/lib/db";
+import { getLabelSettings, listItems } from "@/lib/db";
 import { organizationSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -84,24 +84,38 @@ export async function GET(request: NextRequest) {
     }
 
     if (mode === "labels") {
-      const pages = chunks(items, 40);
+      const pages = chunks(items, 27);
       const origin = request.nextUrl.origin;
+      const settings = await getLabelSettings(org);
+      const labelImageUrl = settings.label_image_url
+        ? escapeHtml(settings.label_image_url)
+        : "";
+      const labelImageScale = Math.min(
+        100,
+        Math.max(20, settings.label_image_scale || 80)
+      );
+
       const pageHtml =
         pages.length === 0
           ? '<div class="empty">등록된 물품이 없습니다.</div>'
           : pages
               .map(
-                (page, pageIndex) => `
+                (page) => `
           <section class="sheet">
             ${page
               .map(
-                (item, itemIndex) => `
+                (item) => `
               <div class="label">
-                <img class="qr" src="${origin}/api/qr/${item.public_id}" alt="QR">
-                <div class="label-info">
-                  <div class="org">${org}</div>
-                  <div class="no">${escapeHtml(item.management_no)}</div>
-                  <div class="seq">${pageIndex * 40 + itemIndex + 1}</div>
+                <div class="qr-area">
+                  <img class="qr" src="${origin}/api/qr/${item.public_id}" alt="QR">
+                </div>
+                <div class="label-right">
+                  <div class="custom-image-wrap">
+                    ${labelImageUrl
+                      ? `<img class="custom-image" src="${labelImageUrl}" alt="라벨 이미지" style="max-width:${labelImageScale}%;max-height:${labelImageScale}%">`
+                      : ""}
+                  </div>
+                  <div class="management-no">${escapeHtml(item.management_no)}</div>
                 </div>
               </div>`
               )
@@ -114,39 +128,67 @@ export async function GET(request: NextRequest) {
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>${org} QR 40칸 라벨</title>
+  <title>${org} QR 폼텍 3104 라벨</title>
   <style>
     *{box-sizing:border-box}
-    @page{size:A4 portrait;margin:14mm 11mm}
+    @page{size:A4 portrait;margin:0}
     html,body{margin:0;padding:0}
     body{font-family:Arial,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;color:#111}
     .controls{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid #ddd}
     .controls button{border:0;border-radius:8px;background:#111;color:#fff;padding:9px 14px;font-weight:700;cursor:pointer}
     .controls span{font-size:12px;color:#555}
-    .sheet{width:188mm;height:269mm;display:grid;grid-template-columns:repeat(4,47mm);grid-template-rows:repeat(10,26.9mm);break-after:page;page-break-after:always}
+    .sheet{
+      width:210mm;height:297mm;
+      padding:11mm 8.4mm 0 8.4mm;
+      display:grid;
+      grid-template-columns:repeat(3,62.7mm);
+      grid-template-rows:repeat(9,30.1mm);
+      column-gap:2.5mm;
+      row-gap:0;
+      align-content:start;
+      break-after:page;
+      page-break-after:always
+    }
     .sheet:last-of-type{break-after:auto;page-break-after:auto}
-    .label{width:47mm;height:26.9mm;overflow:hidden;display:grid;grid-template-columns:22mm 1fr;align-items:center;padding:1.6mm}
-    .qr{display:block;width:20mm;height:20mm;object-fit:contain}
-    .label-info{min-width:0;padding-left:1mm}
-    .org{font-size:6.5pt;font-weight:700;color:#666;margin-bottom:1.2mm}
-    .no{font-size:8pt;font-weight:800;line-height:1.18;overflow-wrap:anywhere;word-break:break-all}
-    .seq{font-size:5.5pt;color:#aaa;margin-top:1.2mm}
+    .label{
+      width:62.7mm;height:30.1mm;overflow:hidden;
+      display:grid;grid-template-columns:28mm 1fr;
+      align-items:center;padding:1.4mm
+    }
+    .qr-area{display:flex;align-items:center;justify-content:center;height:100%}
+    .qr{display:block;width:25.5mm;height:25.5mm;object-fit:contain}
+    .label-right{
+      height:100%;min-width:0;padding-left:1.2mm;
+      display:grid;grid-template-rows:1fr 6.2mm;align-items:center
+    }
+    .custom-image-wrap{
+      min-height:0;display:flex;align-items:center;justify-content:center;
+      overflow:hidden;padding:0.8mm
+    }
+    .custom-image{display:block;object-fit:contain;width:auto;height:auto}
+    .management-no{
+      min-width:0;border-top:0.2mm solid #ddd;padding-top:0.9mm;
+      text-align:center;font-size:8.5pt;font-weight:800;line-height:1.1;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+    }
     .empty{padding:40px;text-align:center}
     @media screen{
       body{background:#eef1f4}
       .sheet{margin:18px auto;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.12)}
+      .label{outline:1px dashed #ddd}
     }
     @media print{
       .controls{display:none}
       body{background:#fff}
       .sheet{margin:0;box-shadow:none}
+      .label{outline:none}
     }
   </style>
 </head>
 <body>
   <div class="controls">
     <button onclick="window.print()">인쇄 / PDF 저장</button>
-    <span>A4 40칸(4×10), 47×26.9mm · 인쇄 배율 100% 권장 · 총 ${items.length}개</span>
+    <span>폼텍 3104 · A4 27칸(3×9) · 62.7×30.1mm · 인쇄 배율 100% 권장 · 총 ${items.length}개</span>
   </div>
   ${pageHtml}
   <script>
