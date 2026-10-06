@@ -11,9 +11,12 @@ export async function DELETE(request: Request) {
   try {
     const body = await request.json();
     const org = organizationSchema.parse(String(body.organization || "").toUpperCase());
-    const ids = Array.isArray(body.ids)
-      ? [...new Set(body.ids.filter((id: unknown): id is string => typeof id === "string" && id.trim()))]
-      : [];
+    const rawIds: unknown[] = Array.isArray(body.ids) ? body.ids : [];
+    const ids: string[] = [...new Set(
+      rawIds.filter((id: unknown): id is string =>
+        typeof id === "string" && id.trim().length > 0
+      )
+    )];
 
     if (!ids.length) {
       return NextResponse.json({ error: "삭제할 물품을 선택해 주세요." }, { status: 400 });
