@@ -24,6 +24,11 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [form, setForm] = useState<Form>(emptyForm(org));
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [labelImageUrl, setLabelImageUrl] = useState("");
+  const [labelImageScale, setLabelImageScale] = useState(80);
+  const [labelSettingsLoading, setLabelSettingsLoading] = useState(false);
+  const [labelUploading, setLabelUploading] = useState(false);
+  const [labelSaving, setLabelSaving] = useState(false);
   const autoEditDone = useRef(false);
 
   const colors = org === "CBGC" ? { primary: "#00a8a8", dark: "#008c8c" } : { primary: "#ea5b96", dark: "#cf3d7d" };
@@ -43,6 +48,26 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [org, search, type]);
   useEffect(() => { setForm(emptyForm(org)); }, [org]);
+  useEffect(() => {
+    if (section !== "qr") return;
+    let active = true;
+    setLabelSettingsLoading(true);
+    fetch(`/api/label-settings?org=${org}`, { cache: "no-store" })
+      .then(async (res) => {
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || "라벨 설정을 불러오지 못했습니다.");
+        if (!active) return;
+        setLabelImageUrl(body.settings?.label_image_url || "");
+        setLabelImageScale(body.settings?.label_image_scale || 80);
+      })
+      .catch((e) => {
+        if (active) console.error(e);
+      })
+      .finally(() => {
+        if (active) setLabelSettingsLoading(false);
+      });
+    return () => { active = false; };
+  }, [org, section]);
   useEffect(() => {
     if (autoEditDone.current || loading) return;
     const publicId = new URLSearchParams(window.location.search).get("edit");
@@ -75,6 +100,52 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
       field("photo_url", body.url);
     } catch (e) { alert(e instanceof Error ? e.message : "사진 업로드에 실패했습니다."); }
     finally { setUploading(false); }
+  }
+
+  async function persistLabelSettings(imageUrl = labelImageUrl, scale = labelImageScale) {
+    setLabelSaving(true);
+    try {
+      const res = await fetch("/api/label-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization: org,
+          label_image_url: imageUrl || null,
+          label_image_scale: scale,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "라벨 설정 저장 실패");
+      setLabelImageUrl(body.settings?.label_image_url || "");
+      setLabelImageScale(body.settings?.label_image_scale || 80);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "라벨 설정 저장에 실패했습니다.");
+    } finally {
+      setLabelSaving(false);
+    }
+  }
+
+  async function uploadLabelImage(file?: File) {
+    if (!file) return;
+    setLabelUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "이미지 업로드 실패");
+      setLabelImageUrl(body.url);
+      await persistLabelSettings(body.url, labelImageScale);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "라벨 이미지 업로드에 실패했습니다.");
+    } finally {
+      setLabelUploading(false);
+    }
+  }
+
+  async function removeLabelImage() {
+    setLabelImageUrl("");
+    await persistLabelSettings("", labelImageScale);
   }
 
   async function save() {
@@ -151,12 +222,49 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
 
           {section === "qr" && <>
             <div className="page-head">
-              <div><h2>{title}</h2><p>물품별 공개페이지 QR을 확인하고, 전체 QR을 라벨지 또는 이미지 파일로 일괄 출력할 수 있습니다.</p></div>
+              <div><h2>{title}</h2><p>폼텍 3104 규격으로 라벨 이미지를 구성하고, 전체 QR을 일괄 출력할 수 있습니다.</p></div>
               <div className="actions">
-                <a className="btn" href={`/api/qr-batch?org=${org}&mode=labels`} target="_blank" rel="noreferrer"><Printer size={15}/> 40칸 라벨 인쇄 / PDF</a>
+                <a className="btn" href={`/api/qr-batch?org=${org}&mode=labels`} target="_blank" rel="noreferrer"><Printer size={15}/> 27칸 라벨 인쇄 / PDF</a>
                 <a className="btn primary" href={`/api/qr-batch?org=${org}&mode=zip`}><Download size={15}/> 전체 QR ZIP</a>
               </div>
             </div>
+
+            <div className="card label-config-card">
+              <div className="label-config-head">
+                <div>
+                  <strong>라벨 오른쪽 이미지 설정</strong>
+                  <p>모든 3104 라벨에 공통으로 들어갈 이미지를 지정합니다. QR은 왼쪽, 이미지는 오른쪽, 관리번호는 이미지 아래에 출력됩니다.</p>
+                </div>
+                <span className="badge">폼텍 3104 · 3×9 · 27칸</span>
+              </div>
+              {labelSettingsLoading ? <div className="empty">라벨 설정 불러오는 중...</div> : <div className="label-config-grid">
+                <div className="label-preview-box">
+                  <div className="label-preview-qr"><QrCode size={64}/></div>
+                  <div className="label-preview-right">
+                    <div className="label-preview-image">
+                      {labelImageUrl ? <Image src={labelImageUrl} alt="라벨 사용자 이미지 미리보기" width={220} height={120} unoptimized style={{maxWidth:`${labelImageScale}%`,maxHeight:`${labelImageScale}%`,width:"auto",height:"auto"}}/> : <span>이미지 없음</span>}
+                    </div>
+                    <div className="label-preview-no">관리번호</div>
+                  </div>
+                </div>
+                <div className="label-config-controls">
+                  <div className="field">
+                    <label>사용자 이미지</label>
+                    <input className="input" type="file" accept="image/jpeg,image/png,image/webp" disabled={labelUploading} onChange={(e)=>uploadLabelImage(e.target.files?.[0])}/>
+                    <small>{labelUploading ? "업로드 중..." : "JPG, PNG, WEBP · 최대 5MB"}</small>
+                  </div>
+                  <div className="field">
+                    <label>이미지 크기: {labelImageScale}%</label>
+                    <input type="range" min="20" max="100" step="5" value={labelImageScale} onChange={(e)=>setLabelImageScale(Number(e.target.value))}/>
+                  </div>
+                  <div className="actions">
+                    <button className="btn primary" disabled={labelSaving || labelUploading} onClick={()=>persistLabelSettings()}>{labelSaving ? "저장 중..." : "이미지 크기 저장"}</button>
+                    {labelImageUrl && <button className="btn danger" disabled={labelSaving || labelUploading} onClick={removeLabelImage}>이미지 제거</button>}
+                  </div>
+                </div>
+              </div>}
+            </div>
+
             {loading ? <div className="card empty">불러오는 중...</div> : items.length===0 ? <div className="card empty">등록된 물품이 없습니다.</div> : <div className="qr-grid">{items.map(i=><div className="card qr-card" key={i.id}><Image src={`/api/qr/${i.public_id}`} alt={`${i.management_no} QR`} width={112} height={112} unoptimized/><div className="meta"><strong>{i.item_name}</strong><span>{i.management_no}</span><span>{i.storage_location || "보관장소 미입력"}</span><div className="actions" style={{marginTop:9}}><a className="btn small" href={`/api/qr/${i.public_id}`} download={`${i.organization}-${i.management_no}-QR.png`}><Download size={13}/> QR 다운로드</a><button className="btn small" onClick={()=>printQr(i)}><Printer size={13}/> 인쇄</button><button className="btn small" onClick={()=>copyPublicUrl(i)}><Copy size={13}/> URL 복사</button><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개보기</a></div></div></div>)}</div>}
           </>}
         </div>
