@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
     .controls span{font-size:12px;color:#555}
     .sheet{
       width:210mm;height:297mm;
-      padding:11mm 8.4mm 0 8.4mm;
+      padding:11mm 0 0 8mm;
       display:grid;
       grid-template-columns:repeat(3,62.7mm);
       grid-template-rows:repeat(9,30.1mm);
@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
 <body>
   <div class="controls">
     <button onclick="window.print()">인쇄 / PDF 저장</button>
-    <span>폼텍 3104 · A4 27칸(3×9) · 62.7×30.1mm · 인쇄 배율 100% 권장 · 총 ${items.length}개</span>
+    <span>3104.hwp 양식 기준 · A4 27칸(3×9) · 62.7×30.1mm · 좌 8mm / 상 11mm · 인쇄 배율 100% · 여백 없음 · 총 ${items.length}개</span>
   </div>
   ${pageHtml}
   <script>
