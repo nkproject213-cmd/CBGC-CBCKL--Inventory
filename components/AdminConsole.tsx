@@ -223,8 +223,9 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
           {section === "qr" && <>
             <div className="page-head">
               <div><h2>{title}</h2><p>폼텍 3104 규격으로 라벨 이미지를 구성하고, 전체 QR을 일괄 출력할 수 있습니다.</p></div>
-              <div className="actions">
+              <div className="actions" style={{alignItems:"center"}}>
                 <a className="btn" href={`/api/qr-batch?org=${org}&mode=labels`} target="_blank" rel="noreferrer"><Printer size={15}/> 27칸 라벨 인쇄 / PDF</a>
+                <span style={{fontSize:11,color:"var(--muted)",fontWeight:700}}>출력시 여백설정 - 여백 없음</span>
                 <a className="btn primary" href={`/api/qr-batch?org=${org}&mode=zip`}><Download size={15}/> 전체 QR ZIP</a>
               </div>
             </div>
