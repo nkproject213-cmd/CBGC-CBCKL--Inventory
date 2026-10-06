@@ -33,7 +33,8 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [bulkManagerSub, setBulkManagerSub] = useState("");
   const [bulkManagerSaving, setBulkManagerSaving] = useState(false);
   const [excelUploading, setExcelUploading] = useState(false);
-  const [deletingAll, setDeletingAll] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingSelected, setDeletingSelected] = useState(false);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const autoEditDone = useRef(false);
 
@@ -49,6 +50,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     if (res.status === 401) { location.href = "/admin/login"; return; }
     const body = await res.json();
     setItems(body.items || []);
+    setSelectedIds(new Set());
     setLoading(false);
   }
 
@@ -229,38 +231,46 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     }
   }
 
-  async function deleteAllItems() {
-    if (!items.length) {
-      alert("삭제할 물품이 없습니다.");
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible(checked: boolean) {
+    setSelectedIds(checked ? new Set(items.map((item) => item.id)) : new Set());
+  }
+
+  async function deleteSelectedItems() {
+    const ids = [...selectedIds];
+    if (!ids.length) {
+      alert("삭제할 물품을 선택해 주세요.");
       return;
     }
 
-    if (!confirm(`현재 ${org} 물품 ${items.length}건을 전부 삭제합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`)) {
+    if (!confirm(`선택한 ${ids.length}개 물품을 삭제하시겠습니까?\n삭제 후에는 되돌릴 수 없습니다.`)) {
       return;
     }
 
-    const expected = `${org} 전체삭제`;
-    const confirmation = prompt(`최종 확인을 위해 아래 문구를 정확히 입력해 주세요.\n\n${expected}`);
-    if (confirmation !== expected) {
-      if (confirmation !== null) alert("확인 문구가 일치하지 않아 삭제하지 않았습니다.");
-      return;
-    }
-
-    setDeletingAll(true);
+    setDeletingSelected(true);
     try {
       const res = await fetch("/api/items/bulk-delete", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organization: org, confirmation }),
+        body: JSON.stringify({ organization: org, ids }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "전체삭제 실패");
-      alert(`${org} 물품 ${body.deleted || 0}건을 삭제했습니다.`);
+      if (!res.ok) throw new Error(body.error || "선택삭제 실패");
+      alert(`${body.deleted || 0}개 물품을 삭제했습니다.`);
+      setSelectedIds(new Set());
       await load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "전체삭제에 실패했습니다.");
+      alert(e instanceof Error ? e.message : "선택삭제에 실패했습니다.");
     } finally {
-      setDeletingAll(false);
+      setDeletingSelected(false);
     }
   }
 
@@ -324,7 +334,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
                 <button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button>
               </div>
             </div>
-            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><button className="btn danger" disabled={deletingAll || loading || items.length===0} onClick={deleteAllItems}><Trash2 size={15}/>{deletingAll?" 삭제 중...":" 전체삭제"}</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} /></div>
+            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><button className="btn danger" disabled={deletingSelected || loading || selectedIds.size===0} onClick={deleteSelectedItems}><Trash2 size={15}/>{deletingSelected?" 삭제 중...":` 선택삭제 (${selectedIds.size})`}</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} selectedIds={selectedIds} onToggleSelected={toggleSelected} onToggleAll={toggleAllVisible} /></div>
           </>}
 
           {section === "qr" && <>
@@ -385,10 +395,34 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   );
 }
 
-function ItemsTable({ items, loading, onEdit, compact=false }: { items: InventoryItem[]; loading:boolean; onEdit:(i:InventoryItem)=>void; compact?:boolean }) {
+function ItemsTable({
+  items, loading, onEdit, compact=false, selectedIds, onToggleSelected, onToggleAll,
+}: {
+  items: InventoryItem[];
+  loading: boolean;
+  onEdit: (i: InventoryItem) => void;
+  compact?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelected?: (id: string) => void;
+  onToggleAll?: (checked: boolean) => void;
+}) {
   if (loading) return <div className="empty">불러오는 중...</div>;
   if (!items.length) return <div className="empty">등록된 물품이 없습니다.</div>;
-  return <div className="table-wrap"><table><thead><tr><th>사진</th><th>관리번호</th><th>품명</th><th>물품유형</th>{!compact&&<><th>규격</th><th>취득일자</th></>}<th>보관장소</th><th>관리책임자(정)</th>{!compact&&<th>관리</th>}</tr></thead><tbody>{items.map(i=><tr key={i.id}><td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name}</strong></td><td>{i.item_type}</td>{!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date?.slice(0,10)||"-"}</td></>}<td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>{!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}</tr>)}</tbody></table></div>;
+
+  const selectable = !compact && selectedIds && onToggleSelected && onToggleAll;
+  const allSelected = Boolean(selectable && items.length > 0 && items.every((item) => selectedIds.has(item.id)));
+
+  return <div className="table-wrap"><table><thead><tr>
+    {selectable&&<th style={{width:42,textAlign:"center"}}><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allSelected} onChange={(e)=>onToggleAll(e.target.checked)}/></th>}
+    <th>사진</th><th>관리번호</th><th>품명</th><th>물품유형</th>{!compact&&<><th>규격</th><th>취득일자</th></>}<th>보관장소</th><th>관리책임자(정)</th>{!compact&&<th>관리</th>}
+  </tr></thead><tbody>{items.map(i=><tr key={i.id}>
+    {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} checked={selectedIds.has(i.id)} onChange={()=>onToggleSelected(i.id)}/></td>}
+    <td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td>
+    <td>{i.management_no}</td><td><strong>{i.item_name}</strong></td><td>{i.item_type}</td>
+    {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date?.slice(0,10)||"-"}</td></>}
+    <td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>
+    {!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}
+  </tr>)}</tbody></table></div>;
 }
 
 function ItemModal({ form, field, editing, close, save, remove, saving, uploading, uploadPhoto }: { form:Form; field:<K extends keyof Form>(key:K,value:Form[K])=>void; editing:InventoryItem|null; close:()=>void; save:()=>void; remove:()=>void; saving:boolean; uploading:boolean; uploadPhoto:(f?:File)=>void; }) {

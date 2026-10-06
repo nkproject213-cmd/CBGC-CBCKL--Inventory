@@ -284,3 +284,20 @@ export async function deleteItemsForOrg(org: Organization) {
 
   return normalizeRows<{ id: string }>(rows).length;
 }
+
+
+export async function deleteItemsByIdsForOrg(org: Organization, ids: string[]) {
+  if (!ids.length) return 0;
+
+  const sql = sqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`
+    DELETE FROM inventory_items
+    WHERE organization = ${org}
+      AND id = ANY(${ids}::uuid[])
+    RETURNING id
+  `;
+
+  return normalizeRows<{ id: string }>(rows).length;
+}
