@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Menu, Plus, Download, Upload, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X, Printer, Copy } from "lucide-react";
+import { Menu, Plus, Download, Upload, Camera, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X, Printer, Copy } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
 
 type Section = "dashboard" | "items" | "qr";
@@ -15,6 +15,74 @@ type Form = {
   accessories: string; specification: string; classification_no: string; identification_no: string; photo_url: string;
 };
 const emptyForm = (org: Organization): Form => ({ organization: org, manager_main:"",manager_sub:"",management_no:"",item_type:"",acquired_date:"",item_name:"",purchase_price:"",useful_life_years:"",storage_location:"",accessories:"",specification:"",classification_no:"",identification_no:"",photo_url:"" });
+
+const ITEM_PHOTO_TARGET_BYTES = 480 * 1024;
+
+async function compressItemPhoto(file: File): Promise<File> {
+  if (file.size <= ITEM_PHOTO_TARGET_BYTES) return file;
+
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("이미지를 불러올 수 없습니다."));
+      img.src = url;
+    });
+
+    let width = image.naturalWidth;
+    let height = image.naturalHeight;
+    const maxSide = 1800;
+
+    if (Math.max(width, height) > maxSide) {
+      const ratio = maxSide / Math.max(width, height);
+      width = Math.max(1, Math.round(width * ratio));
+      height = Math.max(1, Math.round(height * ratio));
+    }
+
+    let quality = 0.82;
+    let lastBlob: Blob | null = null;
+
+    for (let attempt = 0; attempt < 18; attempt += 1) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("사진 압축을 처리할 수 없습니다.");
+      ctx.drawImage(image, 0, 0, width, height);
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/webp", quality);
+      });
+
+      if (!blob) throw new Error("사진 압축에 실패했습니다.");
+      lastBlob = blob;
+
+      if (blob.size <= ITEM_PHOTO_TARGET_BYTES) {
+        const baseName = file.name.replace(/\.[^.]+$/, "") || "item-photo";
+        return new File([blob], `${baseName}.webp`, { type: "image/webp", lastModified: Date.now() });
+      }
+
+      if (quality > 0.5) {
+        quality = Math.max(0.5, quality - 0.08);
+      } else {
+        width = Math.max(480, Math.round(width * 0.82));
+        height = Math.max(360, Math.round(height * 0.82));
+        quality = 0.76;
+      }
+    }
+
+    if (lastBlob && lastBlob.size <= 500 * 1024) {
+      const baseName = file.name.replace(/\.[^.]+$/, "") || "item-photo";
+      return new File([lastBlob], `${baseName}.webp`, { type: "image/webp", lastModified: Date.now() });
+    }
+
+    throw new Error("사진을 500KB 이하로 압축하지 못했습니다.");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export default function AdminConsole({ org, section }: { org: Organization; section: Section }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -127,15 +195,25 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
 
   async function uploadPhoto(file?: File) {
     if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      alert("JPG, PNG, WEBP 사진만 업로드할 수 있습니다.");
+      return;
+    }
+
     setUploading(true);
     try {
-      const fd = new FormData(); fd.append("file", file);
+      const compressed = await compressItemPhoto(file);
+      const fd = new FormData();
+      fd.append("file", compressed);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "업로드 실패");
       field("photo_url", body.url);
-    } catch (e) { alert(e instanceof Error ? e.message : "사진 업로드에 실패했습니다."); }
-    finally { setUploading(false); }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "사진 업로드에 실패했습니다.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function persistLabelSettings(imageUrl = labelImageUrl, scale = labelImageScale) {
@@ -457,5 +535,5 @@ function ItemModal({ form, field, editing, close, save, remove, saving, uploadin
   const fields: Array<[keyof Form,string,string?]> = [
     ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형 *"],["acquired_date","취득일자","date"],["item_name","품명 *"],["purchase_price","구매단가","number"],["useful_life_years","내용년수","number"],["storage_location","보관장소"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
   ];
-  return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><strong>{editing?"물품 수정":"물품 등록"}</strong><button className="btn small" onClick={close}><X size={14}/> 닫기</button></div><div className="modal-body">{editing&&<div className="detail-meta"><span>최종 수정일시</span><strong>{new Intl.DateTimeFormat("ko-KR",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(editing.updated_at))}</strong></div>}<div className="form-grid">{fields.map(([k,label,type])=><div className="field" key={k}><label>{label}</label><input className="input" type={type||"text"} value={form[k]} onChange={(e)=>field(k,e.target.value as never)}/></div>)}<div className="field full"><label>기타구성품</label><textarea className="textarea" rows={3} value={form.accessories} onChange={(e)=>field("accessories",e.target.value)}/></div><div className="field"><label>소속 물품대장</label><select className="select" value={form.organization} onChange={(e)=>field("organization",e.target.value as Organization)}><option>CBGC</option><option>CBCKL</option></select></div><div className="field"><label>물품사진</label><input className="input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e)=>uploadPhoto(e.target.files?.[0])}/>{uploading&&<small>업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div></div></div><div className="modal-foot">{editing&&<button className="btn danger" onClick={remove}><Trash2 size={15}/> 삭제</button>}<div style={{flex:1}}/><button className="btn" onClick={close}>취소</button><button className="btn primary" disabled={saving||uploading} onClick={save}>{saving?"저장 중...":"저장"}</button></div></div></div>;
+  return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><strong>{editing?"물품 수정":"물품 등록"}</strong><button className="btn small" onClick={close}><X size={14}/> 닫기</button></div><div className="modal-body">{editing&&<div className="detail-meta"><span>최종 수정일시</span><strong>{new Intl.DateTimeFormat("ko-KR",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(editing.updated_at))}</strong></div>}<div className="form-grid">{fields.map(([k,label,type])=><div className="field" key={k}><label>{label}</label><input className="input" type={type||"text"} value={form[k]} onChange={(e)=>field(k,e.target.value as never)}/></div>)}<div className="field full"><label>기타구성품</label><textarea className="textarea" rows={3} value={form.accessories} onChange={(e)=>field("accessories",e.target.value)}/></div><div className="field"><label>소속 물품대장</label><select className="select" value={form.organization} onChange={(e)=>field("organization",e.target.value as Organization)}><option>CBGC</option><option>CBCKL</option></select></div><div className="field"><label>물품사진</label><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e)=>{uploadPhoto(e.target.files?.[0]); e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden onChange={(e)=>{uploadPhoto(e.target.files?.[0]); e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 500KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div></div></div><div className="modal-foot">{editing&&<button className="btn danger" onClick={remove}><Trash2 size={15}/> 삭제</button>}<div style={{flex:1}}/><button className="btn" onClick={close}>취소</button><button className="btn primary" disabled={saving||uploading} onClick={save}>{saving?"저장 중...":"저장"}</button></div></div></div>;
 }
