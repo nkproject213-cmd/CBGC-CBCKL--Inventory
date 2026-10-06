@@ -176,16 +176,6 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     await navigator.clipboard.writeText(`${window.location.origin}/item/${i.public_id}`);
     alert("공개 URL이 복사되었습니다.");
   }
-  function formatDateTime(value?: string | null) {
-    if (!value) return "-";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "-";
-    return new Intl.DateTimeFormat("ko-KR", {
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", hour12: false,
-    }).format(d);
-  }
-
   function printQr(i: InventoryItem) {
     const w = window.open("", "_blank", "width=520,height=700");
     if (!w) return;
