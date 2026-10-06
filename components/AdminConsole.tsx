@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Menu, Plus, Download, LogOut, Pencil, QrCode, ExternalLink, Trash2, X, Printer, Copy } from "lucide-react";
+import { Menu, Plus, Download, Upload, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X, Printer, Copy } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
 
 type Section = "dashboard" | "items" | "qr";
@@ -29,6 +29,11 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [labelSettingsLoading, setLabelSettingsLoading] = useState(false);
   const [labelUploading, setLabelUploading] = useState(false);
   const [labelSaving, setLabelSaving] = useState(false);
+  const [bulkManagerMain, setBulkManagerMain] = useState("");
+  const [bulkManagerSub, setBulkManagerSub] = useState("");
+  const [bulkManagerSaving, setBulkManagerSaving] = useState(false);
+  const [excelUploading, setExcelUploading] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement>(null);
   const autoEditDone = useRef(false);
 
   const colors = org === "CBGC" ? { primary: "#00a8a8", dark: "#008c8c" } : { primary: "#ea5b96", dark: "#cf3d7d" };
@@ -170,6 +175,59 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     setEditing(undefined); await load();
   }
 
+  async function applyBulkManagers() {
+    if (!bulkManagerMain.trim() && !bulkManagerSub.trim()) {
+      alert("관리책임자(정) 또는 관리책임자(부) 중 하나 이상 입력해 주세요.");
+      return;
+    }
+    if (!confirm(`${org} 전체 물품의 관리책임자를 일괄 변경하시겠습니까?\n입력하지 않은 칸은 기존 값을 유지합니다.`)) return;
+
+    setBulkManagerSaving(true);
+    try {
+      const res = await fetch("/api/items/bulk-managers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization: org,
+          manager_main: bulkManagerMain,
+          manager_sub: bulkManagerSub,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "일괄 적용 실패");
+      alert(`${body.updated || 0}개 물품에 관리책임자를 적용했습니다.`);
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "관리책임자 일괄 적용에 실패했습니다.");
+    } finally {
+      setBulkManagerSaving(false);
+    }
+  }
+
+  async function uploadExcel(file?: File) {
+    if (!file) return;
+    setExcelUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("organization", org);
+      const res = await fetch("/api/items/import", { method: "POST", body: fd });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "엑셀 업로드 실패");
+
+      const errorText = Array.isArray(body.errors) && body.errors.length
+        ? `\n\n오류 내역:\n${body.errors.join("\n")}`
+        : "";
+      alert(`엑셀 업로드 완료\n등록: ${body.created || 0}건\n실패: ${body.failed || 0}건${errorText}`);
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "엑셀 업로드에 실패했습니다.");
+    } finally {
+      setExcelUploading(false);
+      if (excelInputRef.current) excelInputRef.current.value = "";
+    }
+  }
+
   async function logout() { await fetch("/api/auth/logout", { method:"POST" }); location.href="/admin/login"; }
   function excel() { const p = new URLSearchParams({ org }); if(search)p.set("q",search); if(type)p.set("type",type); location.href=`/api/export?${p}`; }
   async function copyPublicUrl(i: InventoryItem) {
@@ -216,8 +274,21 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
           </>}
 
           {section === "items" && <>
-            <div className="page-head"><div><h2>{title}</h2><p>물품의 모든 내부 정보를 조회·수정하고 공개 QR 페이지를 관리합니다.</p></div><button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button></div>
-            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} /></div>
+            <div className="page-head">
+              <div><h2>{title}</h2><p>물품의 모든 내부 정보를 조회·수정하고 공개 QR 페이지를 관리합니다.</p></div>
+              <div className="actions" style={{alignItems:"flex-end"}}>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <div className="actions">
+                    <input className="input" style={{width:125}} placeholder="책임자(정)" value={bulkManagerMain} onChange={(e)=>setBulkManagerMain(e.target.value)}/>
+                    <input className="input" style={{width:125}} placeholder="책임자(부)" value={bulkManagerSub} onChange={(e)=>setBulkManagerSub(e.target.value)}/>
+                    <button className="btn" disabled={bulkManagerSaving} onClick={applyBulkManagers}><Users size={15}/>{bulkManagerSaving?" 적용 중...":" 책임자 일괄 적용"}</button>
+                  </div>
+                  <span style={{fontSize:11,color:"var(--muted)"}}>빈 칸은 기존 값 유지 · 현재 {org} 전체 물품에 적용</span>
+                </div>
+                <button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button>
+              </div>
+            </div>
+            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} /></div>
           </>}
 
           {section === "qr" && <>

@@ -232,3 +232,41 @@ export async function saveLabelSettings(
     updated_at: string;
   }>(rows)[0];
 }
+
+
+export async function updateManagersForOrg(
+  org: Organization,
+  managerMain: string | null,
+  managerSub: string | null
+) {
+  const sql = sqlClient();
+  await ensureSchema(sql);
+
+  let rows: unknown;
+  if (managerMain && managerSub) {
+    rows = await sql`
+      UPDATE inventory_items
+      SET manager_main = ${managerMain}, manager_sub = ${managerSub}, updated_at = NOW()
+      WHERE organization = ${org}
+      RETURNING id
+    `;
+  } else if (managerMain) {
+    rows = await sql`
+      UPDATE inventory_items
+      SET manager_main = ${managerMain}, updated_at = NOW()
+      WHERE organization = ${org}
+      RETURNING id
+    `;
+  } else if (managerSub) {
+    rows = await sql`
+      UPDATE inventory_items
+      SET manager_sub = ${managerSub}, updated_at = NOW()
+      WHERE organization = ${org}
+      RETURNING id
+    `;
+  } else {
+    return 0;
+  }
+
+  return normalizeRows<{ id: string }>(rows).length;
+}
