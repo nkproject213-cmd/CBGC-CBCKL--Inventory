@@ -107,7 +107,8 @@ export async function getPublicItem(publicId: string) {
   const rows = await sql`
     SELECT
       public_id, organization, manager_main, manager_sub, management_no,
-      acquired_date, item_name, storage_location, specification, photo_url
+      TO_CHAR(acquired_date, 'YYYY-MM-DD') AS acquired_date,
+      item_name, storage_location, specification, photo_url
     FROM inventory_items
     WHERE public_id = ${publicId}
     LIMIT 1
