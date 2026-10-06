@@ -7,6 +7,8 @@ import { Menu, Plus, Download, Upload, Users, LogOut, Pencil, QrCode, ExternalLi
 import type { InventoryItem, Organization } from "@/lib/types";
 
 type Section = "dashboard" | "items" | "qr";
+type SortKey = "default" | "management_no" | "item_name" | "item_type" | "acquired_date" | "storage_location" | "manager_main" | "updated_at";
+type SortDirection = "asc" | "desc";
 type Form = {
   organization: Organization; manager_main: string; manager_sub: string; management_no: string; item_type: string;
   acquired_date: string; item_name: string; purchase_price: string; useful_life_years: string; storage_location: string;
@@ -19,6 +21,8 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("default");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null | undefined>(undefined);
   const [form, setForm] = useState<Form>(emptyForm(org));
@@ -88,6 +92,30 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   }, [items, loading]);
 
   const allTypes = useMemo(() => [...new Set(items.map((i) => i.item_type))].sort(), [items]);
+
+  const sortedItems = useMemo(() => {
+    if (sortKey === "default") return items;
+
+    const getValue = (item: InventoryItem) => {
+      switch (sortKey) {
+        case "management_no": return item.management_no || "";
+        case "item_name": return item.item_name || "";
+        case "item_type": return item.item_type || "";
+        case "acquired_date": return item.acquired_date || "";
+        case "storage_location": return item.storage_location || "";
+        case "manager_main": return item.manager_main || "";
+        case "updated_at": return item.updated_at || "";
+        default: return "";
+      }
+    };
+
+    return [...items].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      const result = av.localeCompare(bv, "ko-KR", { numeric: true, sensitivity: "base" });
+      return sortDirection === "asc" ? result : -result;
+    });
+  }, [items, sortKey, sortDirection]);
   const locations = useMemo(() => new Set(items.map((i) => i.storage_location).filter(Boolean)).size, [items]);
   const recent = useMemo(() => { const d = Date.now() - 30*86400000; return items.filter(i => new Date(i.created_at).getTime() >= d).length; }, [items]);
 
@@ -241,7 +269,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   }
 
   function toggleAllVisible(checked: boolean) {
-    setSelectedIds(checked ? new Set(items.map((item) => item.id)) : new Set());
+    setSelectedIds(checked ? new Set(sortedItems.map((item) => item.id)) : new Set());
   }
 
   async function deleteSelectedItems() {
@@ -334,7 +362,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
                 <button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button>
               </div>
             </div>
-            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><button className="btn danger" disabled={deletingSelected || loading || selectedIds.size===0} onClick={deleteSelectedItems}><Trash2 size={15}/>{deletingSelected?" 삭제 중...":` 선택삭제 (${selectedIds.size})`}</button></div><ItemsTable items={items} loading={loading} onEdit={openEdit} selectedIds={selectedIds} onToggleSelected={toggleSelected} onToggleAll={toggleAllVisible} /></div>
+            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><select className="select" style={{maxWidth:170}} value={sortKey} onChange={(e)=>setSortKey(e.target.value as SortKey)}><option value="default">기본 정렬</option><option value="management_no">관리번호</option><option value="item_name">품명</option><option value="item_type">물품유형</option><option value="acquired_date">취득일자</option><option value="storage_location">보관장소</option><option value="manager_main">관리책임자(정)</option><option value="updated_at">수정일</option></select><select className="select" style={{maxWidth:130}} value={sortDirection} onChange={(e)=>setSortDirection(e.target.value as SortDirection)} disabled={sortKey==="default"}><option value="asc">오름차순</option><option value="desc">내림차순</option></select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><button className="btn danger" disabled={deletingSelected || loading || selectedIds.size===0} onClick={deleteSelectedItems}><Trash2 size={15}/>{deletingSelected?" 삭제 중...":` 선택삭제 (${selectedIds.size})`}</button></div><ItemsTable items={sortedItems} loading={loading} onEdit={openEdit} selectedIds={selectedIds} onToggleSelected={toggleSelected} onToggleAll={toggleAllVisible} /></div>
           </>}
 
           {section === "qr" && <>
