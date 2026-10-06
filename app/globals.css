@@ -101,6 +101,21 @@ tbody tr:hover { background: #fbfdfd; }
 .qr-card .meta strong, .qr-card .meta span { display: block; }
 .qr-card .meta span { margin-top: 4px; color: var(--muted); font-size: 12px; }
 
+.label-config-card { margin-bottom: 18px; padding: 18px; }
+.label-config-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.label-config-head > div > strong { font-size: 16px; }
+.label-config-head p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.label-config-grid { display: grid; grid-template-columns: minmax(320px, .9fr) minmax(320px, 1.1fr); gap: 22px; align-items: center; }
+.label-preview-box { width: 100%; aspect-ratio: 62.7 / 30.1; border: 1px solid var(--border); border-radius: 12px; background: #fff; display: grid; grid-template-columns: 45% 55%; overflow: hidden; box-shadow: inset 0 0 0 1px #f3f4f6; }
+.label-preview-qr { display: flex; align-items: center; justify-content: center; border-right: 1px dashed var(--border); color: #111; }
+.label-preview-right { min-width: 0; display: grid; grid-template-rows: 1fr 28%; }
+.label-preview-image { min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 8px; color: var(--muted); font-size: 12px; }
+.label-preview-image img { object-fit: contain; }
+.label-preview-no { border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: center; padding: 5px; font-size: 13px; font-weight: 900; }
+.label-config-controls { min-width: 0; }
+.label-config-controls small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; }
+.label-config-controls input[type="range"] { width: 100%; accent-color: var(--primary); }
+
 .public-page { min-height: 100vh; padding: 24px; }
 .public-shell { width: min(760px, 100%); margin: 0 auto; }
 .public-head { border-radius: 16px; padding: 20px; color: #fff; background: var(--primary); margin-bottom: 16px; }
@@ -130,6 +145,8 @@ tbody tr:hover { background: #fbfdfd; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .full { grid-column: auto; }
   .page-head { flex-direction: column; }
+  .label-config-head { flex-direction: column; }
+  .label-config-grid { grid-template-columns: 1fr; }
   .info-row { grid-template-columns: 105px 1fr; }
 }
 @media (max-width: 520px) { .stats { grid-template-columns: 1fr; } }
