@@ -21,8 +21,8 @@ function primitive(cell: ExcelJS.Cell): string | number | Date | null {
   }
   if (typeof value === "object" && "result" in value) {
     const result = value.result;
+    if (result == null) return null;
     if (
-      result == null ||
       typeof result === "string" ||
       typeof result === "number" ||
       result instanceof Date
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
     }
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(Buffer.from(await file.arrayBuffer()));
+    await workbook.xlsx.load(Buffer.from(await file.arrayBuffer()) as never);
     const sheet = workbook.getWorksheet("물품업로드") || workbook.worksheets[0];
 
     if (!sheet) {

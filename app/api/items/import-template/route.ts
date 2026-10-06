@@ -61,9 +61,8 @@ export async function GET() {
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const arrayBuffer = Uint8Array.from(buffer).buffer;
 
-  return new NextResponse(arrayBuffer, {
+  return new NextResponse(buffer as never, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": 'attachment; filename="inventory_import_template.xlsx"',
