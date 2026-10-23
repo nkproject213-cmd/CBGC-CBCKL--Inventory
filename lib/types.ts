@@ -18,10 +18,14 @@ export type InventoryItem = {
   classification_no: string | null;
   identification_no: string | null;
   photo_url: string | null;
+  unit: string | null;
+  quantity: number | null;
+  item_status: string | null;
   created_at: string;
   updated_at: string;
 };
 
+// Adding printable internal fields must not expand anonymous public access.
 export type PublicInventoryItem = Pick<
   InventoryItem,
   | "public_id"

@@ -41,16 +41,23 @@ async function ensureSchema(sql: SqlClient) {
         )
       `;
 
+      // Additive migration: keep all existing items, public IDs and label settings.
+      // Unknown values remain NULL rather than inventing quantity, unit or status.
+      await sql`
+        ALTER TABLE inventory_items
+          ADD COLUMN IF NOT EXISTS unit TEXT,
+          ADD COLUMN IF NOT EXISTS quantity INTEGER CHECK (quantity >= 0),
+          ADD COLUMN IF NOT EXISTS item_status TEXT
+      `;
+
       await sql`
         CREATE INDEX IF NOT EXISTS idx_inventory_items_org
         ON inventory_items (organization)
       `;
-
       await sql`
         CREATE INDEX IF NOT EXISTS idx_inventory_items_name
         ON inventory_items (item_name)
       `;
-
       await sql`
         CREATE TABLE IF NOT EXISTS inventory_settings (
           organization VARCHAR(10) PRIMARY KEY CHECK (organization IN ('CBGC', 'CBCKL')),
@@ -59,9 +66,11 @@ async function ensureSchema(sql: SqlClient) {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
-    })();
+    })().catch((error) => {
+      schemaReady = null;
+      throw error;
+    });
   }
-
   await schemaReady;
 }
 
@@ -72,10 +81,10 @@ function normalizeRows<T>(rows: unknown): T[] {
 export async function listItems(org: Organization, q = "", type = "") {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const query = `%${q.trim()}%`;
   const rows = await sql`
-    SELECT * FROM inventory_items
+    SELECT inventory_items.*, TO_CHAR(acquired_date, 'YYYY-MM-DD') AS acquired_date
+    FROM inventory_items
     WHERE organization = ${org}
       AND (${q.trim()} = '' OR (
         management_no ILIKE ${query}
@@ -95,15 +104,13 @@ export async function listItems(org: Organization, q = "", type = "") {
 export async function getItem(id: string) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
-  const rows = await sql`SELECT * FROM inventory_items WHERE id = ${id} LIMIT 1`;
+  const rows = await sql`SELECT inventory_items.*, TO_CHAR(acquired_date, 'YYYY-MM-DD') AS acquired_date FROM inventory_items WHERE id = ${id} LIMIT 1`;
   return normalizeRows<InventoryItem>(rows)[0] ?? null;
 }
 
 export async function getPublicItem(publicId: string) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const rows = await sql`
     SELECT
       public_id, organization, manager_main, manager_sub, management_no,
@@ -121,7 +128,6 @@ export async function createItem(
 ) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const id = crypto.randomUUID();
   const publicId = crypto.randomUUID();
   const rows = await sql`
@@ -129,12 +135,12 @@ export async function createItem(
       id, public_id, organization, manager_main, manager_sub, management_no,
       item_type, acquired_date, item_name, purchase_price, useful_life_years,
       storage_location, accessories, specification, classification_no,
-      identification_no, photo_url
+      identification_no, photo_url, unit, quantity, item_status
     ) VALUES (
       ${id}, ${publicId}, ${data.organization}, ${data.manager_main}, ${data.manager_sub}, ${data.management_no},
       ${data.item_type}, ${data.acquired_date}, ${data.item_name}, ${data.purchase_price}, ${data.useful_life_years},
       ${data.storage_location}, ${data.accessories}, ${data.specification}, ${data.classification_no},
-      ${data.identification_no}, ${data.photo_url}
+      ${data.identification_no}, ${data.photo_url}, ${data.unit ?? null}, ${data.quantity ?? null}, ${data.item_status ?? null}
     )
     RETURNING *
   `;
@@ -147,7 +153,6 @@ export async function updateItem(
 ) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const rows = await sql`
     UPDATE inventory_items SET
       organization = ${data.organization},
@@ -165,6 +170,9 @@ export async function updateItem(
       classification_no = ${data.classification_no},
       identification_no = ${data.identification_no},
       photo_url = ${data.photo_url},
+      unit = ${data.unit ?? null},
+      quantity = ${data.quantity ?? null},
+      item_status = ${data.item_status ?? null},
       updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
@@ -175,130 +183,70 @@ export async function updateItem(
 export async function deleteItem(id: string) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const rows = await sql`DELETE FROM inventory_items WHERE id = ${id} RETURNING *`;
   return normalizeRows<InventoryItem>(rows)[0] ?? null;
 }
 
-
+// Retained for rollback; the new print UI no longer uses custom label images.
 export async function getLabelSettings(org: Organization) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const rows = await sql`
     SELECT organization, label_image_url, label_image_scale, updated_at
-    FROM inventory_settings
-    WHERE organization = ${org}
-    LIMIT 1
+    FROM inventory_settings WHERE organization = ${org} LIMIT 1
   `;
-
   return normalizeRows<{
-    organization: Organization;
-    label_image_url: string | null;
-    label_image_scale: number;
-    updated_at: string;
+    organization: Organization; label_image_url: string | null;
+    label_image_scale: number; updated_at: string;
   }>(rows)[0] ?? {
-    organization: org,
-    label_image_url: null,
-    label_image_scale: 80,
+    organization: org, label_image_url: null, label_image_scale: 80,
     updated_at: new Date(0).toISOString(),
   };
 }
 
-export async function saveLabelSettings(
-  org: Organization,
-  labelImageUrl: string | null,
-  labelImageScale: number
-) {
+export async function saveLabelSettings(org: Organization, labelImageUrl: string | null, labelImageScale: number) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   const rows = await sql`
-    INSERT INTO inventory_settings (
-      organization, label_image_url, label_image_scale, updated_at
-    ) VALUES (
-      ${org}, ${labelImageUrl}, ${labelImageScale}, NOW()
-    )
+    INSERT INTO inventory_settings (organization, label_image_url, label_image_scale, updated_at)
+    VALUES (${org}, ${labelImageUrl}, ${labelImageScale}, NOW())
     ON CONFLICT (organization) DO UPDATE SET
       label_image_url = EXCLUDED.label_image_url,
       label_image_scale = EXCLUDED.label_image_scale,
       updated_at = NOW()
     RETURNING organization, label_image_url, label_image_scale, updated_at
   `;
-
   return normalizeRows<{
-    organization: Organization;
-    label_image_url: string | null;
-    label_image_scale: number;
-    updated_at: string;
+    organization: Organization; label_image_url: string | null;
+    label_image_scale: number; updated_at: string;
   }>(rows)[0];
 }
 
-
-export async function updateManagersForOrg(
-  org: Organization,
-  managerMain: string | null,
-  managerSub: string | null
-) {
+export async function updateManagersForOrg(org: Organization, managerMain: string | null, managerSub: string | null) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
   let rows: unknown;
   if (managerMain && managerSub) {
-    rows = await sql`
-      UPDATE inventory_items
-      SET manager_main = ${managerMain}, manager_sub = ${managerSub}, updated_at = NOW()
-      WHERE organization = ${org}
-      RETURNING id
-    `;
+    rows = await sql`UPDATE inventory_items SET manager_main = ${managerMain}, manager_sub = ${managerSub}, updated_at = NOW() WHERE organization = ${org} RETURNING id`;
   } else if (managerMain) {
-    rows = await sql`
-      UPDATE inventory_items
-      SET manager_main = ${managerMain}, updated_at = NOW()
-      WHERE organization = ${org}
-      RETURNING id
-    `;
+    rows = await sql`UPDATE inventory_items SET manager_main = ${managerMain}, updated_at = NOW() WHERE organization = ${org} RETURNING id`;
   } else if (managerSub) {
-    rows = await sql`
-      UPDATE inventory_items
-      SET manager_sub = ${managerSub}, updated_at = NOW()
-      WHERE organization = ${org}
-      RETURNING id
-    `;
-  } else {
-    return 0;
-  }
-
+    rows = await sql`UPDATE inventory_items SET manager_sub = ${managerSub}, updated_at = NOW() WHERE organization = ${org} RETURNING id`;
+  } else { return 0; }
   return normalizeRows<{ id: string }>(rows).length;
 }
-
 
 export async function deleteItemsForOrg(org: Organization) {
   const sql = sqlClient();
   await ensureSchema(sql);
-
-  const rows = await sql`
-    DELETE FROM inventory_items
-    WHERE organization = ${org}
-    RETURNING id
-  `;
-
+  const rows = await sql`DELETE FROM inventory_items WHERE organization = ${org} RETURNING id`;
   return normalizeRows<{ id: string }>(rows).length;
 }
 
-
 export async function deleteItemsByIdsForOrg(org: Organization, ids: string[]) {
   if (!ids.length) return 0;
-
   const sql = sqlClient();
   await ensureSchema(sql);
-
-  const rows = await sql`
-    DELETE FROM inventory_items
-    WHERE organization = ${org}
-      AND id = ANY(${ids}::uuid[])
-    RETURNING id
-  `;
-
+  const rows = await sql`DELETE FROM inventory_items WHERE organization = ${org} AND id = ANY(${ids}::uuid[]) RETURNING id`;
   return normalizeRows<{ id: string }>(rows).length;
 }

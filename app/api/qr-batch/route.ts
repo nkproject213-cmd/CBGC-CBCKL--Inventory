@@ -2,220 +2,91 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import JSZip from "jszip";
 import { isAdmin } from "@/lib/auth";
-import { getLabelSettings, listItems } from "@/lib/db";
+import { listItems } from "@/lib/db";
 import { organizationSchema } from "@/lib/validation";
+import { renderQrLabelDocument } from "@/lib/qr-print";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function safeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function chunks<T>(items: T[], size: number) {
-  const result: T[][] = [];
-  for (let i = 0; i < items.length; i += size) result.push(items.slice(i, i + size));
-  return result;
+// Streaming also supports complete 1,500-item label sheets over 4.5 MB.
+function streamBytes(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= bytes.byteLength) { controller.close(); return; }
+      const end = Math.min(offset + 32 * 1024, bytes.byteLength);
+      controller.enqueue(bytes.slice(offset, end));
+      offset = end;
+    },
+  });
 }
 
 export async function GET(request: NextRequest) {
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   }
-
+  const parsedOrg = organizationSchema.safeParse(request.nextUrl.searchParams.get("org")?.toUpperCase());
+  if (!parsedOrg.success) return NextResponse.json({ error: "물품대장을 확인해 주세요." }, { status: 400 });
+  const org = parsedOrg.data;
+  const mode = request.nextUrl.searchParams.get("mode") || "zip";
+  if (mode !== "zip" && mode !== "labels") {
+    return NextResponse.json({ error: "지원하지 않는 다운로드 방식입니다." }, { status: 400 });
+  }
   try {
-    const org = organizationSchema.parse(
-      request.nextUrl.searchParams.get("org")?.toUpperCase()
-    );
-    const mode = request.nextUrl.searchParams.get("mode") || "zip";
-    const items = await listItems(org);
-
-    items.sort((a, b) =>
-      a.management_no.localeCompare(b.management_no, "ko", {
-        numeric: true,
-        sensitivity: "base",
-      })
-    );
-
-    if (mode === "zip") {
-      const zip = new JSZip();
-      const folder = zip.folder(`${org}_QR`);
-      const origin = request.nextUrl.origin;
-
-      await Promise.all(
-        items.map(async (item, index) => {
-          const target = `${origin}/item/${item.public_id}`;
-          const png = await QRCode.toBuffer(target, {
-            type: "png",
-            width: 900,
-            margin: 2,
-            errorCorrectionLevel: "H",
-          });
-          const order = String(index + 1).padStart(4, "0");
-          folder?.file(
-            `${order}_${safeFileName(item.management_no)}_QR.png`,
-            png
-          );
-        })
-      );
-
-      const buffer = await zip.generateAsync({
-        type: "arraybuffer",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 },
-      });
-
-      return new NextResponse(buffer, {
-        headers: {
-          "Content-Type": "application/zip",
-          "Content-Disposition": `attachment; filename="${org}_QR_ALL.zip"`,
-          "Cache-Control": "no-store",
-        },
-      });
+    const publicId = request.nextUrl.searchParams.get("publicId");
+    let items = await listItems(org);
+    if (publicId) {
+      items = items.filter((item) => item.public_id === publicId);
+      if (!items.length) return NextResponse.json({ error: "물품을 찾을 수 없습니다." }, { status: 404 });
     }
+    items.sort((a, b) => a.management_no.localeCompare(b.management_no, "ko", { numeric: true, sensitivity: "base" }));
+    const origin = request.nextUrl.origin;
 
     if (mode === "labels") {
-      const pages = chunks(items, 27);
-      const origin = request.nextUrl.origin;
-      const settings = await getLabelSettings(org);
-      const labelImageUrl = settings.label_image_url
-        ? escapeHtml(settings.label_image_url)
-        : "";
-      const labelImageScale = Math.min(
-        100,
-        Math.max(20, settings.label_image_scale || 80)
-      );
-
-      const pageHtml =
-        pages.length === 0
-          ? '<div class="empty">등록된 물품이 없습니다.</div>'
-          : pages
-              .map(
-                (page) => `
-          <section class="sheet">
-            ${page
-              .map(
-                (item) => `
-              <div class="label">
-                <div class="qr-area">
-                  <img class="qr" src="${origin}/api/qr/${item.public_id}" alt="QR">
-                </div>
-                <div class="label-right">
-                  <div class="custom-image-wrap">
-                    ${labelImageUrl
-                      ? `<img class="custom-image" src="${labelImageUrl}" alt="라벨 이미지" style="max-width:${labelImageScale}%;max-height:${labelImageScale}%">`
-                      : ""}
-                  </div>
-                  <div class="management-no">${escapeHtml(item.management_no)}</div>
-                </div>
-              </div>`
-              )
-              .join("")}
-          </section>`
-              )
-              .join("");
-
-      const html = `<!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8">
-  <title>${org} QR 폼텍 3104 라벨</title>
-  <style>
-    *{box-sizing:border-box}
-    @page{size:A4 portrait;margin:0}
-    html,body{margin:0;padding:0}
-    body{font-family:Arial,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;color:#111}
-    .controls{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid #ddd}
-    .controls button{border:0;border-radius:8px;background:#111;color:#fff;padding:9px 14px;font-weight:700;cursor:pointer}
-    .controls span{font-size:12px;color:#555}
-    .sheet{
-      width:210mm;height:297mm;
-      padding:11mm 0 0 8mm;
-      display:grid;
-      grid-template-columns:repeat(3,62.7mm);
-      grid-template-rows:repeat(9,30.1mm);
-      column-gap:2.5mm;
-      row-gap:0;
-      align-content:start;
-      break-after:page;
-      page-break-after:always
-    }
-    .sheet:last-of-type{break-after:auto;page-break-after:auto}
-    .label{
-      width:62.7mm;height:30.1mm;overflow:hidden;
-      display:grid;grid-template-columns:28mm 1fr;
-      align-items:center;padding:1.4mm
-    }
-    .qr-area{display:flex;align-items:center;justify-content:center;height:100%}
-    .qr{display:block;width:25.5mm;height:25.5mm;object-fit:contain}
-    .label-right{
-      height:100%;min-width:0;padding-left:1.2mm;
-      display:grid;grid-template-rows:1fr 6.2mm;align-items:center
-    }
-    .custom-image-wrap{
-      min-height:0;display:flex;align-items:center;justify-content:center;
-      overflow:hidden;padding:0.8mm
-    }
-    .custom-image{display:block;object-fit:contain;width:auto;height:auto}
-    .management-no{
-      min-width:0;border-top:0.2mm solid #ddd;padding-top:0.9mm;
-      text-align:center;font-size:8.5pt;font-weight:800;line-height:1.1;
-      overflow:hidden;text-overflow:ellipsis;white-space:nowrap
-    }
-    .empty{padding:40px;text-align:center}
-    @media screen{
-      body{background:#eef1f4}
-      .sheet{margin:18px auto;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.12)}
-      .label{outline:1px dashed #ddd}
-    }
-    @media print{
-      .controls{display:none}
-      body{background:#fff}
-      .sheet{margin:0;box-shadow:none}
-      .label{outline:none}
-    }
-  </style>
-</head>
-<body>
-  <div class="controls">
-    <button onclick="window.print()">인쇄 / PDF 저장</button>
-    <span>3104.hwp 양식 기준 · A4 27칸(3×9) · 62.7×30.1mm · 좌 8mm / 상 11mm · 인쇄 배율 100% · 여백 없음 · 총 ${items.length}개</span>
-  </div>
-  ${pageHtml}
-  <script>
-    window.addEventListener("load", () => {
-      const images = Array.from(document.images);
-      Promise.all(images.map(img => img.complete ? Promise.resolve() : new Promise(resolve => {
-        img.onload = resolve; img.onerror = resolve;
-      }))).then(() => setTimeout(() => window.print(), 150));
-    });
-  <\/script>
-</body>
-</html>`;
-
-      return new NextResponse(html, {
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store",
-        },
+      const qrSvgs = new Map<string, string>();
+      // Embed generated QR vectors once; printing does not issue one DB request per label.
+      for (let offset = 0; offset < items.length; offset += 24) {
+        await Promise.all(items.slice(offset, offset + 24).map(async (item) => {
+          const svg = await QRCode.toString(`${origin}/item/${item.public_id}`, {
+            type: "svg", margin: 4, errorCorrectionLevel: "M",
+          });
+          qrSvgs.set(item.public_id, svg);
+        }));
+      }
+      const html = renderQrLabelDocument(org, items, qrSvgs);
+      return new NextResponse(streamBytes(new TextEncoder().encode(html)), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" },
       });
     }
 
-    return NextResponse.json({ error: "지원하지 않는 다운로드 방식입니다." }, { status: 400 });
+    const zip = new JSZip();
+    const folder = zip.folder(`${org}_QR`);
+    // Bound PNG generation concurrency to avoid spikes with large inventories.
+    for (let offset = 0; offset < items.length; offset += 16) {
+      await Promise.all(items.slice(offset, offset + 16).map(async (item, index) => {
+        const png = await QRCode.toBuffer(`${origin}/item/${item.public_id}`, {
+          type: "png", width: 900, margin: 2, errorCorrectionLevel: "H",
+        });
+        const order = String(offset + index + 1).padStart(4, "0");
+        folder?.file(`${order}_${safeFileName(item.management_no)}_QR.png`, png);
+      }));
+    }
+    const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });
+    return new NextResponse(streamBytes(buffer), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${org}_QR_ALL.zip"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
   } catch (error) {
     console.error(error);
-    return NextResponse.json(
-      { error: "QR 일괄 파일 생성 중 오류가 발생했습니다." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "QR 일괄 파일 생성 중 오류가 발생했습니다." }, { status: 500 });
   }
 }

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/test-qr-print.mjs && next build",
+    "test:qr-print": "node scripts/test-qr-print.mjs",
     "start": "next start",
     "lint": "eslint .",
     "db:init": "node scripts/init-db.mjs",

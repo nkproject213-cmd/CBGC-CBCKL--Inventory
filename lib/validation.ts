@@ -14,6 +14,14 @@ const nullableNumber = z.union([z.number(), z.string(), z.null()]).optional().tr
   return n;
 });
 
+const nullableQuantity = z.preprocess((value) => {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  if (typeof value === "string") return Number(value.replaceAll(",", "").trim());
+  return value;
+}, z.number().int("수량은 정수로 입력해 주세요.")
+  .min(0, "수량은 0 이상이어야 합니다.")
+  .max(2147483647, "수량이 너무 큽니다.").nullable());
+
 export const itemSchema = z.object({
   organization: organizationSchema,
   manager_main: nullableText,
@@ -30,4 +38,7 @@ export const itemSchema = z.object({
   classification_no: nullableText,
   identification_no: nullableText,
   photo_url: nullableText,
+  unit: nullableText,
+  quantity: nullableQuantity,
+  item_status: nullableText,
 });

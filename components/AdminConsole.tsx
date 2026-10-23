@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Plus, Download, Upload, Camera, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X, Printer, Copy } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
+import { labelFields } from "@/lib/qr-print";
 
 type Section = "dashboard" | "items" | "qr";
 type SortKey = "default" | "management_no" | "item_name" | "item_type" | "acquired_date" | "storage_location" | "manager_main" | "updated_at";
@@ -13,14 +14,13 @@ type Form = {
   organization: Organization; manager_main: string; manager_sub: string; management_no: string; item_type: string;
   acquired_date: string; item_name: string; purchase_price: string; useful_life_years: string; storage_location: string;
   accessories: string; specification: string; classification_no: string; identification_no: string; photo_url: string;
+  unit: string; quantity: string; item_status: string;
 };
-const emptyForm = (org: Organization): Form => ({ organization: org, manager_main:"",manager_sub:"",management_no:"",item_type:"",acquired_date:"",item_name:"",purchase_price:"",useful_life_years:"",storage_location:"",accessories:"",specification:"",classification_no:"",identification_no:"",photo_url:"" });
+const emptyForm = (org: Organization): Form => ({ organization: org, manager_main:"",manager_sub:"",management_no:"",item_type:"",acquired_date:"",item_name:"",purchase_price:"",useful_life_years:"",storage_location:"",accessories:"",specification:"",classification_no:"",identification_no:"",photo_url:"",unit:"",quantity:"",item_status:"" });
 
 const ITEM_PHOTO_TARGET_BYTES = 480 * 1024;
-
 async function compressItemPhoto(file: File): Promise<File> {
   if (file.size <= ITEM_PHOTO_TARGET_BYTES) return file;
-
   const url = URL.createObjectURL(file);
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -29,59 +29,42 @@ async function compressItemPhoto(file: File): Promise<File> {
       img.onerror = () => reject(new Error("이미지를 불러올 수 없습니다."));
       img.src = url;
     });
-
     let width = image.naturalWidth;
     let height = image.naturalHeight;
     const maxSide = 1800;
-
     if (Math.max(width, height) > maxSide) {
       const ratio = maxSide / Math.max(width, height);
       width = Math.max(1, Math.round(width * ratio));
       height = Math.max(1, Math.round(height * ratio));
     }
-
     let quality = 0.82;
     let lastBlob: Blob | null = null;
-
     for (let attempt = 0; attempt < 18; attempt += 1) {
       const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-
+      canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("사진 압축을 처리할 수 없습니다.");
       ctx.drawImage(image, 0, 0, width, height);
-
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, "image/webp", quality);
-      });
-
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", quality));
       if (!blob) throw new Error("사진 압축에 실패했습니다.");
       lastBlob = blob;
-
       if (blob.size <= ITEM_PHOTO_TARGET_BYTES) {
         const baseName = file.name.replace(/\.[^.]+$/, "") || "item-photo";
         return new File([blob], `${baseName}.webp`, { type: "image/webp", lastModified: Date.now() });
       }
-
-      if (quality > 0.5) {
-        quality = Math.max(0.5, quality - 0.08);
-      } else {
+      if (quality > 0.5) { quality = Math.max(0.5, quality - 0.08); }
+      else {
         width = Math.max(480, Math.round(width * 0.82));
         height = Math.max(360, Math.round(height * 0.82));
         quality = 0.76;
       }
     }
-
     if (lastBlob && lastBlob.size <= 500 * 1024) {
       const baseName = file.name.replace(/\.[^.]+$/, "") || "item-photo";
       return new File([lastBlob], `${baseName}.webp`, { type: "image/webp", lastModified: Date.now() });
     }
-
     throw new Error("사진을 500KB 이하로 압축하지 못했습니다.");
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  } finally { URL.revokeObjectURL(url); }
 }
 
 export default function AdminConsole({ org, section }: { org: Organization; section: Section }) {
@@ -96,11 +79,6 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [form, setForm] = useState<Form>(emptyForm(org));
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [labelImageUrl, setLabelImageUrl] = useState("");
-  const [labelImageScale, setLabelImageScale] = useState(80);
-  const [labelSettingsLoading, setLabelSettingsLoading] = useState(false);
-  const [labelUploading, setLabelUploading] = useState(false);
-  const [labelSaving, setLabelSaving] = useState(false);
   const [bulkManagerMain, setBulkManagerMain] = useState("");
   const [bulkManagerSub, setBulkManagerSub] = useState("");
   const [bulkManagerSaving, setBulkManagerSaving] = useState(false);
@@ -112,162 +90,73 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
 
   const colors = org === "CBGC" ? { primary: "#00a8a8", dark: "#008c8c" } : { primary: "#ea5b96", dark: "#cf3d7d" };
   const base = `/admin/${org.toLowerCase()}`;
-
   async function load() {
     setLoading(true);
     const params = new URLSearchParams({ org });
     if (search) params.set("q", search);
     if (type) params.set("type", type);
-    const res = await fetch(`/api/items?${params}`, { cache: "no-store" });
-    if (res.status === 401) { location.href = "/admin/login"; return; }
-    const body = await res.json();
-    setItems(body.items || []);
-    setSelectedIds(new Set());
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/items?${params}`, { cache: "no-store" });
+      if (res.status === 401) { location.href = "/admin/login"; return; }
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "물품을 불러오지 못했습니다.");
+      setItems(body.items || []);
+      setSelectedIds(new Set());
+    } catch (e) { alert(e instanceof Error ? e.message : "물품을 불러오지 못했습니다."); }
+    finally { setLoading(false); }
   }
-
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [org, search, type]);
   useEffect(() => { setForm(emptyForm(org)); }, [org]);
-  useEffect(() => {
-    if (section !== "qr") return;
-    let active = true;
-    setLabelSettingsLoading(true);
-    fetch(`/api/label-settings?org=${org}`, { cache: "no-store" })
-      .then(async (res) => {
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error || "라벨 설정을 불러오지 못했습니다.");
-        if (!active) return;
-        setLabelImageUrl(body.settings?.label_image_url || "");
-        setLabelImageScale(body.settings?.label_image_scale || 80);
-      })
-      .catch((e) => {
-        if (active) console.error(e);
-      })
-      .finally(() => {
-        if (active) setLabelSettingsLoading(false);
-      });
-    return () => { active = false; };
-  }, [org, section]);
   useEffect(() => {
     if (autoEditDone.current || loading) return;
     const publicId = new URLSearchParams(window.location.search).get("edit");
     if (!publicId) { autoEditDone.current = true; return; }
     const target = items.find((item) => item.public_id === publicId);
-    if (target) {
-      autoEditDone.current = true;
-      openEdit(target);
-    }
+    if (target) { autoEditDone.current = true; openEdit(target); }
   }, [items, loading]);
 
   const allTypes = useMemo(() => [...new Set(items.map((i) => i.item_type))].sort(), [items]);
-
   const sortedItems = useMemo(() => {
     if (sortKey === "default") return items;
-
-    const getValue = (item: InventoryItem) => {
-      switch (sortKey) {
-        case "management_no": return item.management_no || "";
-        case "item_name": return item.item_name || "";
-        case "item_type": return item.item_type || "";
-        case "acquired_date": return item.acquired_date || "";
-        case "storage_location": return item.storage_location || "";
-        case "manager_main": return item.manager_main || "";
-        case "updated_at": return item.updated_at || "";
-        default: return "";
-      }
-    };
-
     return [...items].sort((a, b) => {
-      const av = getValue(a);
-      const bv = getValue(b);
+      const av = a[sortKey] || "";
+      const bv = b[sortKey] || "";
       const result = av.localeCompare(bv, "ko-KR", { numeric: true, sensitivity: "base" });
       return sortDirection === "asc" ? result : -result;
     });
   }, [items, sortKey, sortDirection]);
   const locations = useMemo(() => new Set(items.map((i) => i.storage_location).filter(Boolean)).size, [items]);
   const recent = useMemo(() => { const d = Date.now() - 30*86400000; return items.filter(i => new Date(i.created_at).getTime() >= d).length; }, [items]);
+  const previewItem = useMemo(() => [...items].sort((a,b) => a.management_no.localeCompare(b.management_no,"ko",{numeric:true}))[0], [items]);
 
   function openNew() { setEditing(null); setForm(emptyForm(org)); }
   function openEdit(i: InventoryItem) {
-    setEditing(i); setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type, acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"" });
+    setEditing(i);
+    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type, acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:i.item_status||"" });
   }
   function field<K extends keyof Form>(key: K, value: Form[K]) { setForm((p) => ({ ...p, [key]: value })); }
-
   async function uploadPhoto(file?: File) {
     if (!file) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      alert("JPG, PNG, WEBP 사진만 업로드할 수 있습니다.");
-      return;
-    }
-
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { alert("JPG, PNG, WEBP 사진만 업로드할 수 있습니다."); return; }
     setUploading(true);
     try {
       const compressed = await compressItemPhoto(file);
-      const fd = new FormData();
-      fd.append("file", compressed);
+      const fd = new FormData(); fd.append("file", compressed);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "업로드 실패");
       field("photo_url", body.url);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "사진 업로드에 실패했습니다.");
-    } finally {
-      setUploading(false);
-    }
+    } catch (e) { alert(e instanceof Error ? e.message : "사진 업로드에 실패했습니다."); }
+    finally { setUploading(false); }
   }
-
-  async function persistLabelSettings(imageUrl = labelImageUrl, scale = labelImageScale) {
-    setLabelSaving(true);
-    try {
-      const res = await fetch("/api/label-settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          organization: org,
-          label_image_url: imageUrl || null,
-          label_image_scale: scale,
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "라벨 설정 저장 실패");
-      setLabelImageUrl(body.settings?.label_image_url || "");
-      setLabelImageScale(body.settings?.label_image_scale || 80);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "라벨 설정 저장에 실패했습니다.");
-    } finally {
-      setLabelSaving(false);
-    }
-  }
-
-  async function uploadLabelImage(file?: File) {
-    if (!file) return;
-    setLabelUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "이미지 업로드 실패");
-      setLabelImageUrl(body.url);
-      await persistLabelSettings(body.url, labelImageScale);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "라벨 이미지 업로드에 실패했습니다.");
-    } finally {
-      setLabelUploading(false);
-    }
-  }
-
-  async function removeLabelImage() {
-    setLabelImageUrl("");
-    await persistLabelSettings("", labelImageScale);
-  }
-
   async function save() {
     if (!form.management_no.trim() || !form.item_type.trim() || !form.item_name.trim()) { alert("관리번호, 물품유형, 품명은 필수입니다."); return; }
+    const quantity = form.quantity.trim() === "" ? null : Number(form.quantity);
+    if (quantity !== null && (!Number.isInteger(quantity) || quantity < 0 || quantity > 2147483647)) { alert("수량은 0 이상의 정수로 입력해 주세요."); return; }
     setSaving(true);
     try {
-      const payload = { ...form, purchase_price: form.purchase_price === "" ? null : Number(form.purchase_price), useful_life_years: form.useful_life_years === "" ? null : Number(form.useful_life_years), acquired_date: form.acquired_date || null, manager_main:form.manager_main||null,manager_sub:form.manager_sub||null,storage_location:form.storage_location||null,accessories:form.accessories||null,specification:form.specification||null,classification_no:form.classification_no||null,identification_no:form.identification_no||null,photo_url:form.photo_url||null };
-      const res = await fetch(editing ? `/api/items/${editing.id}` : "/api/items", { method: editing ? "PATCH" : "POST", headers: { "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+      const payload = { ...form, quantity, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price === "" ? null : Number(form.purchase_price), useful_life_years:form.useful_life_years === "" ? null : Number(form.useful_life_years), acquired_date:form.acquired_date||null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
+      const res = await fetch(editing ? `/api/items/${editing.id}` : "/api/items", { method: editing ? "PATCH" : "POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "저장에 실패했습니다.");
       setEditing(undefined);
@@ -276,176 +165,115 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     } catch (e) { alert(e instanceof Error ? e.message : "저장에 실패했습니다."); }
     finally { setSaving(false); }
   }
-
   async function remove() {
     if (!editing || !confirm("정말 이 물품을 삭제하시겠습니까?")) return;
     const res = await fetch(`/api/items/${editing.id}`, { method:"DELETE" });
     if (!res.ok) { const b=await res.json(); alert(b.error || "삭제 실패"); return; }
     setEditing(undefined); await load();
   }
-
   async function applyBulkManagers() {
-    if (!bulkManagerMain.trim() && !bulkManagerSub.trim()) {
-      alert("관리책임자(정) 또는 관리책임자(부) 중 하나 이상 입력해 주세요.");
-      return;
-    }
+    if (!bulkManagerMain.trim() && !bulkManagerSub.trim()) { alert("관리책임자(정) 또는 관리책임자(부) 중 하나 이상 입력해 주세요."); return; }
     if (!confirm(`${org} 전체 물품의 관리책임자를 일괄 변경하시겠습니까?\n입력하지 않은 칸은 기존 값을 유지합니다.`)) return;
-
     setBulkManagerSaving(true);
     try {
-      const res = await fetch("/api/items/bulk-managers", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          organization: org,
-          manager_main: bulkManagerMain,
-          manager_sub: bulkManagerSub,
-        }),
-      });
+      const res = await fetch("/api/items/bulk-managers", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ organization:org, manager_main:bulkManagerMain, manager_sub:bulkManagerSub }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "일괄 적용 실패");
-      alert(`${body.updated || 0}개 물품에 관리책임자를 적용했습니다.`);
-      await load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "관리책임자 일괄 적용에 실패했습니다.");
-    } finally {
-      setBulkManagerSaving(false);
-    }
+      alert(`${body.updated || 0}개 물품에 관리책임자를 적용했습니다.`); await load();
+    } catch (e) { alert(e instanceof Error ? e.message : "관리책임자 일괄 적용에 실패했습니다."); }
+    finally { setBulkManagerSaving(false); }
   }
-
   async function uploadExcel(file?: File) {
     if (!file) return;
     setExcelUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("organization", org);
-      const res = await fetch("/api/items/import", { method: "POST", body: fd });
+      const fd = new FormData(); fd.append("file",file); fd.append("organization",org);
+      const res = await fetch("/api/items/import", { method:"POST", body:fd });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "엑셀 업로드 실패");
-
-      const errorText = Array.isArray(body.errors) && body.errors.length
-        ? `\n\n오류 내역:\n${body.errors.join("\n")}`
-        : "";
-      alert(`엑셀 업로드 완료\n등록: ${body.created || 0}건\n실패: ${body.failed || 0}건${errorText}`);
-      await load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "엑셀 업로드에 실패했습니다.");
-    } finally {
-      setExcelUploading(false);
-      if (excelInputRef.current) excelInputRef.current.value = "";
-    }
+      const errorText = Array.isArray(body.errors) && body.errors.length ? `\n\n오류 내역:\n${body.errors.join("\n")}` : "";
+      alert(`엑셀 업로드 완료\n등록: ${body.created || 0}건\n실패: ${body.failed || 0}건${errorText}`); await load();
+    } catch (e) { alert(e instanceof Error ? e.message : "엑셀 업로드에 실패했습니다."); }
+    finally { setExcelUploading(false); if(excelInputRef.current) excelInputRef.current.value=""; }
   }
-
-  function toggleSelected(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function toggleSelected(id:string) {
+    setSelectedIds(current => { const next=new Set(current); if(next.has(id)) next.delete(id); else next.add(id); return next; });
   }
-
-  function toggleAllVisible(checked: boolean) {
-    setSelectedIds(checked ? new Set(sortedItems.map((item) => item.id)) : new Set());
-  }
-
+  function toggleAllVisible(checked:boolean) { setSelectedIds(checked ? new Set(sortedItems.map(i=>i.id)) : new Set()); }
   async function deleteSelectedItems() {
-    const ids = [...selectedIds];
-    if (!ids.length) {
-      alert("삭제할 물품을 선택해 주세요.");
-      return;
-    }
-
-    if (!confirm(`선택한 ${ids.length}개 물품을 삭제하시겠습니까?\n삭제 후에는 되돌릴 수 없습니다.`)) {
-      return;
-    }
-
+    const ids=[...selectedIds];
+    if(!ids.length) { alert("삭제할 물품을 선택해 주세요."); return; }
+    if(!confirm(`선택한 ${ids.length}개 물품을 삭제하시겠습니까?\n삭제 후에는 되돌릴 수 없습니다.`)) return;
     setDeletingSelected(true);
     try {
-      const res = await fetch("/api/items/bulk-delete", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organization: org, ids }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "선택삭제 실패");
-      alert(`${body.deleted || 0}개 물품을 삭제했습니다.`);
-      setSelectedIds(new Set());
-      await load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "선택삭제에 실패했습니다.");
-    } finally {
-      setDeletingSelected(false);
-    }
+      const res=await fetch("/api/items/bulk-delete",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({organization:org,ids})});
+      const body=await res.json();
+      if(!res.ok) throw new Error(body.error||"선택삭제 실패");
+      alert(`${body.deleted||0}개 물품을 삭제했습니다.`); setSelectedIds(new Set()); await load();
+    } catch(e) { alert(e instanceof Error ? e.message : "선택삭제에 실패했습니다."); }
+    finally { setDeletingSelected(false); }
   }
-
-  async function logout() { await fetch("/api/auth/logout", { method:"POST" }); location.href="/admin/login"; }
-  function excel() { const p = new URLSearchParams({ org }); if(search)p.set("q",search); if(type)p.set("type",type); location.href=`/api/export?${p}`; }
-  async function copyPublicUrl(i: InventoryItem) {
-    await navigator.clipboard.writeText(`${window.location.origin}/item/${i.public_id}`);
-    alert("공개 URL이 복사되었습니다.");
+  async function logout() { await fetch("/api/auth/logout",{method:"POST"}); location.href="/admin/login"; }
+  function excel() { const p=new URLSearchParams({org}); if(search)p.set("q",search); if(type)p.set("type",type); location.href=`/api/export?${p}`; }
+  async function copyPublicUrl(i:InventoryItem) { await navigator.clipboard.writeText(`${window.location.origin}/item/${i.public_id}`); alert("공개 URL이 복사되었습니다."); }
+  function printQr(i:InventoryItem) {
+    const params=new URLSearchParams({org:i.organization,mode:"labels",publicId:i.public_id});
+    window.open(`/api/qr-batch?${params}`,"_blank","noopener,noreferrer");
   }
-  function printQr(i: InventoryItem) {
-    const w = window.open("", "_blank", "width=520,height=700");
-    if (!w) return;
-    const qr = `${window.location.origin}/api/qr/${i.public_id}`;
-    const color = i.organization === "CBGC" ? "#00a8a8" : "#ea5b96";
-    w.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${i.management_no} QR</title><style>body{font-family:Arial,sans-serif;display:grid;place-items:center;padding:30px}.label{width:320px;text-align:center;border:2px solid ${color};border-radius:16px;padding:20px}.org{font-size:24px;font-weight:900;color:${color}.no{font-size:16px;font-weight:800;margin-top:10px}.name{margin-top:6px}img{width:260px;height:260px}@media print{button{display:none}}</style></head><body><div class="label"><div class="org">${i.organization}</div><img src="${qr}" alt="QR"><div class="no">${i.management_no}</div><div class="name">${i.item_name}</div></div><script>window.onload=()=>window.print()<\/script></body></html>`);
-    w.document.close();
-  }
-  const title = section === "dashboard" ? `${org} 물품관리 대시보드` : section === "items" ? `${org} 물품관리` : `${org} QR 관리`;
+  const title=section==="dashboard"?`${org} 물품관리 대시보드`:section==="items"?`${org} 물품관리`:`${org} QR 관리`;
 
   return (
-    <div className="admin" style={{ "--primary": colors.primary, "--primary-dark": colors.dark } as React.CSSProperties}>
-      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+    <div className="admin" style={{"--primary":colors.primary,"--primary-dark":colors.dark} as React.CSSProperties}>
+      <aside className={`sidebar ${sidebarOpen?"open":""}`}>
         <div className="logo">CBGC · CBCKL<small>통합 물품관리 시스템</small></div>
         <div className="side-label">물품대장 선택</div>
-        <div className="org-switch">
-          <Link className={org==="CBGC"?"active":""} href="/admin/cbgc/dashboard">CBGC</Link>
-          <Link className={org==="CBCKL"?"active":""} href="/admin/cbckl/dashboard">CBCKL</Link>
-        </div>
+        <div className="org-switch"><Link className={org==="CBGC"?"active":""} href="/admin/cbgc/dashboard">CBGC</Link><Link className={org==="CBCKL"?"active":""} href="/admin/cbckl/dashboard">CBCKL</Link></div>
         <div className="side-label">관리 메뉴</div>
         <nav className="side-menu">
           <Link className={section==="dashboard"?"active":""} href={`${base}/dashboard`}>대시보드</Link>
           <Link className={section==="items"?"active":""} href={`${base}/items`}>물품관리</Link>
-          <button onClick={openNew}><Plus size={16} /> 물품등록</button>
+          <button onClick={openNew}><Plus size={16}/> 물품등록</button>
           <Link className={section==="qr"?"active":""} href={`${base}/qr`}>QR 관리</Link>
-          <button onClick={excel}><Download size={16} /> Excel 다운로드</button>
+          <button onClick={excel}><Download size={16}/> Excel 다운로드</button>
         </nav>
-        <div className="side-bottom"><div className="current-org"><span>현재 물품대장</span><strong>{org}</strong></div><button className="btn block" onClick={logout}><LogOut size={15} /> 로그아웃</button></div>
+        <div className="side-bottom"><div className="current-org"><span>현재 물품대장</span><strong>{org}</strong></div><button className="btn block" onClick={logout}><LogOut size={15}/> 로그아웃</button></div>
       </aside>
-
       <main className="main">
-        <header className="topbar"><div style={{display:"flex",alignItems:"center",gap:10}}><button className="mobile-toggle" onClick={()=>setSidebarOpen(!sidebarOpen)}><Menu /></button><h1>{title}</h1></div><span className="badge">{org} 관리자</span></header>
+        <header className="topbar"><div style={{display:"flex",alignItems:"center",gap:10}}><button className="mobile-toggle" onClick={()=>setSidebarOpen(!sidebarOpen)}><Menu/></button><h1>{title}</h1></div><span className="badge">{org} 관리자</span></header>
         <div className="content">
-          {section === "dashboard" && <>
+          {section==="dashboard"&&<>
             <div className="page-head"><div><h2>{title}</h2><p>현재 선택된 물품대장의 현황을 확인합니다.</p></div><button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button></div>
             <div className="stats"><div className="card stat"><span>전체 물품 수</span><strong>{items.length}</strong></div><div className="card stat"><span>물품유형 수</span><strong>{allTypes.length}</strong></div><div className="card stat"><span>보관장소 수</span><strong>{locations}</strong></div><div className="card stat"><span>최근 30일 등록</span><strong>{recent}</strong></div></div>
-            <div className="card"><div className="toolbar"><strong>최근 등록 물품</strong><div className="grow"/><Link className="btn small" href={`${base}/items`}>전체 보기</Link></div><ItemsTable items={items.slice(0,5)} loading={loading} onEdit={openEdit} compact /></div>
+            <div className="card"><div className="toolbar"><strong>최근 등록 물품</strong><div className="grow"/><Link className="btn small" href={`${base}/items`}>전체 보기</Link></div><ItemsTable items={items.slice(0,5)} loading={loading} onEdit={openEdit} compact/></div>
           </>}
-
-          {section === "items" && <>
+          {section==="items"&&<>
             <div className="page-head">
               <div><h2>{title}</h2><p>물품의 모든 내부 정보를 조회·수정하고 공개 QR 페이지를 관리합니다.</p></div>
               <div className="actions" style={{alignItems:"flex-start",gap:8}}>
-                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  <div className="actions">
-                    <input className="input" style={{width:125}} placeholder="책임자(정)" value={bulkManagerMain} onChange={(e)=>setBulkManagerMain(e.target.value)}/>
-                    <input className="input" style={{width:125}} placeholder="책임자(부)" value={bulkManagerSub} onChange={(e)=>setBulkManagerSub(e.target.value)}/>
-                    <button className="btn" disabled={bulkManagerSaving} onClick={applyBulkManagers}><Users size={15}/>{bulkManagerSaving?" 적용 중...":" 책임자 일괄 적용"}</button>
-                  </div>
-                  <span style={{fontSize:11,color:"var(--muted)"}}>빈 칸은 기존 값 유지 · 현재 {org} 전체 물품에 적용</span>
-                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}><div className="actions">
+                  <input className="input" style={{width:125}} placeholder="책임자(정)" value={bulkManagerMain} onChange={e=>setBulkManagerMain(e.target.value)}/>
+                  <input className="input" style={{width:125}} placeholder="책임자(부)" value={bulkManagerSub} onChange={e=>setBulkManagerSub(e.target.value)}/>
+                  <button className="btn" disabled={bulkManagerSaving} onClick={applyBulkManagers}><Users size={15}/>{bulkManagerSaving?" 적용 중...":" 책임자 일괄 적용"}</button>
+                </div><span style={{fontSize:11,color:"var(--muted)"}}>빈 칸은 기존 값 유지 · 현재 {org} 전체 물품에 적용</span></div>
                 <button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button>
               </div>
             </div>
-            <div className="card"><div className="toolbar"><input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={(e)=>setSearch(e.target.value)}/><select className="select" style={{maxWidth:220}} value={type} onChange={(e)=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select><select className="select" style={{maxWidth:170}} value={sortKey} onChange={(e)=>setSortKey(e.target.value as SortKey)}><option value="default">기본 정렬</option><option value="management_no">관리번호</option><option value="item_name">품명</option><option value="item_type">물품유형</option><option value="acquired_date">취득일자</option><option value="storage_location">보관장소</option><option value="manager_main">관리책임자(정)</option><option value="updated_at">수정일</option></select><select className="select" style={{maxWidth:130}} value={sortDirection} onChange={(e)=>setSortDirection(e.target.value as SortDirection)} disabled={sortKey==="default"}><option value="asc">오름차순</option><option value="desc">내림차순</option></select><div className="grow"/><input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(e)=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><button className="btn danger" disabled={deletingSelected || loading || selectedIds.size===0} onClick={deleteSelectedItems}><Trash2 size={15}/>{deletingSelected?" 삭제 중...":` 선택삭제 (${selectedIds.size})`}</button></div><ItemsTable items={sortedItems} loading={loading} onEdit={openEdit} selectedIds={selectedIds} onToggleSelected={toggleSelected} onToggleAll={toggleAllVisible} /></div>
+            <div className="card"><div className="toolbar">
+              <input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={e=>setSearch(e.target.value)}/>
+              <select className="select" style={{maxWidth:220}} value={type} onChange={e=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select>
+              <select className="select" style={{maxWidth:170}} value={sortKey} onChange={e=>setSortKey(e.target.value as SortKey)}><option value="default">기본 정렬</option><option value="management_no">관리번호</option><option value="item_name">품명</option><option value="item_type">물품유형</option><option value="acquired_date">취득일자</option><option value="storage_location">보관장소</option><option value="manager_main">관리책임자(정)</option><option value="updated_at">수정일</option></select>
+              <select className="select" style={{maxWidth:130}} value={sortDirection} onChange={e=>setSortDirection(e.target.value as SortDirection)} disabled={sortKey==="default"}><option value="asc">오름차순</option><option value="desc">내림차순</option></select>
+              <div className="grow"/>
+              <input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={e=>uploadExcel(e.target.files?.[0])}/>
+              <a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a>
+              <button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button>
+              <button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button>
+              <button className="btn danger" disabled={deletingSelected||loading||selectedIds.size===0} onClick={deleteSelectedItems}><Trash2 size={15}/>{deletingSelected?" 삭제 중...":` 선택삭제 (${selectedIds.size})`}</button>
+            </div><ItemsTable items={sortedItems} loading={loading} onEdit={openEdit} selectedIds={selectedIds} onToggleSelected={toggleSelected} onToggleAll={toggleAllVisible}/></div>
           </>}
-
-          {section === "qr" && <>
+          {section==="qr"&&<>
             <div className="page-head">
-              <div><h2>{title}</h2><p>폼텍 3104 규격으로 라벨 이미지를 구성하고, 전체 QR을 일괄 출력할 수 있습니다.</p></div>
+              <div><h2>{title}</h2><p>QR과 물품정보 10개 항목을 폼텍 3104 라벨에 출력합니다.</p></div>
               <div className="actions" style={{alignItems:"flex-end"}}>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
                   <span style={{fontSize:11,color:"var(--muted)",fontWeight:700}}>출력시 여백설정 - 여백 없음</span>
@@ -454,86 +282,54 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
                 <a className="btn primary" href={`/api/qr-batch?org=${org}&mode=zip`}><Download size={15}/> 전체 QR ZIP</a>
               </div>
             </div>
-
             <div className="card label-config-card">
-              <div className="label-config-head">
-                <div>
-                  <strong>라벨 오른쪽 이미지 설정</strong>
-                  <p>모든 3104 라벨에 공통으로 들어갈 이미지를 지정합니다. QR은 왼쪽, 이미지는 오른쪽, 관리번호는 이미지 아래에 출력됩니다.</p>
-                </div>
-                <span className="badge">폼텍 3104 · 3×9 · 27칸</span>
-              </div>
-              {labelSettingsLoading ? <div className="empty">라벨 설정 불러오는 중...</div> : <div className="label-config-grid">
-                <div className="label-preview-box">
-                  <div className="label-preview-qr"><QrCode size={64}/></div>
-                  <div className="label-preview-right">
-                    <div className="label-preview-image">
-                      {labelImageUrl ? <Image src={labelImageUrl} alt="라벨 사용자 이미지 미리보기" width={220} height={120} unoptimized style={{maxWidth:`${labelImageScale}%`,maxHeight:`${labelImageScale}%`,width:"auto",height:"auto"}}/> : <span>이미지 없음</span>}
-                    </div>
-                    <div className="label-preview-no">관리번호</div>
-                  </div>
-                </div>
-                <div className="label-config-controls">
-                  <div className="field">
-                    <label>사용자 이미지</label>
-                    <input className="input" type="file" accept="image/jpeg,image/png,image/webp" disabled={labelUploading} onChange={(e)=>uploadLabelImage(e.target.files?.[0])}/>
-                    <small>{labelUploading ? "업로드 중..." : "JPG, PNG, WEBP · 최대 5MB"}</small>
-                  </div>
-                  <div className="field">
-                    <label>이미지 크기: {labelImageScale}%</label>
-                    <input type="range" min="20" max="100" step="5" value={labelImageScale} onChange={(e)=>setLabelImageScale(Number(e.target.value))}/>
-                  </div>
-                  <div className="actions">
-                    <button className="btn primary" disabled={labelSaving || labelUploading} onClick={()=>persistLabelSettings()}>{labelSaving ? "저장 중..." : "이미지 크기 저장"}</button>
-                    {labelImageUrl && <button className="btn danger" disabled={labelSaving || labelUploading} onClick={removeLabelImage}>이미지 제거</button>}
-                  </div>
-                </div>
+              <div className="label-config-head"><div><strong>물품정보 라벨</strong><p>품명, 관리번호, 규격, 단위, 수량, 취득일자, 상태, 위치, 관리책임자(정), 관리책임자(부)를 모두 표시합니다. 위치는 기존 보관장소 값입니다.</p><p>입력하지 않은 항목은 -로 출력됩니다. 단위·수량·상태는 물품관리의 수정 및 상세에서 입력할 수 있습니다. 관리번호순으로 출력됩니다.</p></div><span className="badge">폼텍 3104 · 3×9 · 27칸</span></div>
+              {!loading&&previewItem&&<div style={{display:"flex",flexWrap:"wrap",gap:20,alignItems:"center"}}>
+                <Image src={`/api/qr/${previewItem.public_id}`} alt="라벨 QR 예시" width={112} height={112} unoptimized/>
+                <dl style={{display:"grid",gridTemplateColumns:"auto minmax(0,1fr)",gap:"5px 14px",fontSize:12,margin:0,minWidth:0,flex:"1 1 240px"}}>{labelFields(previewItem).map(([label,value])=><div key={label} style={{display:"contents"}}><dt style={{fontWeight:700}}>{label}</dt><dd style={{margin:0,overflowWrap:"anywhere"}}>{value}</dd></div>)}</dl>
+                <button className="btn small" onClick={()=>printQr(previewItem)}><Printer size={14}/> 이 물품 라벨 인쇄 / PDF</button>
               </div>}
+              <p style={{fontSize:11,color:"var(--muted)",marginBottom:0}}>A4 · 배율 100% · 여백 없음 · 머리글·바닥글 끔. 기존 사용자 이미지 삽입 기능은 사용하지 않습니다. 물품사진은 그대로 유지됩니다.</p>
             </div>
-
-            {loading ? <div className="card empty">불러오는 중...</div> : items.length===0 ? <div className="card empty">등록된 물품이 없습니다.</div> : <div className="qr-grid">{items.map(i=><div className="card qr-card" key={i.id}><Image src={`/api/qr/${i.public_id}`} alt={`${i.management_no} QR`} width={112} height={112} unoptimized/><div className="meta"><strong>{i.item_name}</strong><span>{i.management_no}</span><span>{i.storage_location || "보관장소 미입력"}</span><div className="actions" style={{marginTop:9}}><a className="btn small" href={`/api/qr/${i.public_id}`} download={`${i.organization}-${i.management_no}-QR.png`}><Download size={13}/> QR 다운로드</a><button className="btn small" onClick={()=>printQr(i)}><Printer size={13}/> 인쇄</button><button className="btn small" onClick={()=>copyPublicUrl(i)}><Copy size={13}/> URL 복사</button><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개보기</a></div></div></div>)}</div>}
+            {loading?<div className="card empty">불러오는 중...</div>:items.length===0?<div className="card empty">등록된 물품이 없습니다.</div>:<div className="qr-grid">{items.map(i=><div className="card qr-card" key={i.id}><Image src={`/api/qr/${i.public_id}`} alt={`${i.management_no} QR`} width={112} height={112} unoptimized/><div className="meta"><strong>{i.item_name}</strong><span>{i.management_no}</span><span>{i.storage_location||"보관장소 미입력"}</span><div className="actions" style={{marginTop:9}}><a className="btn small" href={`/api/qr/${i.public_id}`} download={`${i.organization}-${i.management_no}-QR.png`}><Download size={13}/> QR 다운로드</a><button className="btn small" onClick={()=>printQr(i)}><Printer size={13}/> 인쇄</button><button className="btn small" onClick={()=>copyPublicUrl(i)}><Copy size={13}/> URL 복사</button><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개보기</a></div></div></div>)}</div>}
           </>}
         </div>
       </main>
-
-      {editing !== undefined && <ItemModal form={form} field={field} editing={editing} close={()=>setEditing(undefined)} save={save} remove={remove} saving={saving} uploading={uploading} uploadPhoto={uploadPhoto} />}
+      {editing!==undefined&&<ItemModal form={form} field={field} editing={editing} close={()=>setEditing(undefined)} save={save} remove={remove} saving={saving} uploading={uploading} uploadPhoto={uploadPhoto}/>}
     </div>
   );
 }
 
-function ItemsTable({
-  items, loading, onEdit, compact=false, selectedIds, onToggleSelected, onToggleAll,
-}: {
-  items: InventoryItem[];
-  loading: boolean;
-  onEdit: (i: InventoryItem) => void;
-  compact?: boolean;
-  selectedIds?: Set<string>;
-  onToggleSelected?: (id: string) => void;
-  onToggleAll?: (checked: boolean) => void;
-}) {
-  if (loading) return <div className="empty">불러오는 중...</div>;
-  if (!items.length) return <div className="empty">등록된 물품이 없습니다.</div>;
-
-  const selectable = !compact && selectedIds && onToggleSelected && onToggleAll;
-  const allSelected = Boolean(selectable && items.length > 0 && items.every((item) => selectedIds.has(item.id)));
-
+function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSelected,onToggleAll}:{items:InventoryItem[];loading:boolean;onEdit:(i:InventoryItem)=>void;compact?:boolean;selectedIds?:Set<string>;onToggleSelected?:(id:string)=>void;onToggleAll?:(checked:boolean)=>void}) {
+  if(loading) return <div className="empty">불러오는 중...</div>;
+  if(!items.length) return <div className="empty">등록된 물품이 없습니다.</div>;
+  const selectable=Boolean(!compact&&selectedIds&&onToggleSelected&&onToggleAll);
+  const allSelected=selectable&&items.every(i=>selectedIds?.has(i.id));
   return <div className="table-wrap"><table><thead><tr>
-    {selectable&&<th style={{width:42,textAlign:"center"}}><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allSelected} onChange={(e)=>onToggleAll(e.target.checked)}/></th>}
+    {selectable&&<th style={{width:42,textAlign:"center"}}><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allSelected} onChange={e=>onToggleAll?.(e.target.checked)}/></th>}
     <th>사진</th><th>관리번호</th><th>품명</th><th>물품유형</th>{!compact&&<><th>규격</th><th>취득일자</th></>}<th>보관장소</th><th>관리책임자(정)</th>{!compact&&<th>관리</th>}
   </tr></thead><tbody>{items.map(i=><tr key={i.id}>
-    {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} checked={selectedIds.has(i.id)} onChange={()=>onToggleSelected(i.id)}/></td>}
-    <td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td>
-    <td>{i.management_no}</td><td><strong>{i.item_name}</strong></td><td>{i.item_type}</td>
-    {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date?.slice(0,10)||"-"}</td></>}
-    <td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>
-    {!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}
+    {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} checked={selectedIds?.has(i.id)||false} onChange={()=>onToggleSelected?.(i.id)}/></td>}
+    <td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name}</strong></td><td>{i.item_type}</td>
+    {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date?.slice(0,10)||"-"}</td></>}<td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>
+    {!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank" rel="noreferrer"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}
   </tr>)}</tbody></table></div>;
 }
 
-function ItemModal({ form, field, editing, close, save, remove, saving, uploading, uploadPhoto }: { form:Form; field:<K extends keyof Form>(key:K,value:Form[K])=>void; editing:InventoryItem|null; close:()=>void; save:()=>void; remove:()=>void; saving:boolean; uploading:boolean; uploadPhoto:(f?:File)=>void; }) {
-  const fields: Array<[keyof Form,string,string?]> = [
-    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형 *"],["acquired_date","취득일자","date"],["item_name","품명 *"],["purchase_price","구매단가","number"],["useful_life_years","내용년수","number"],["storage_location","보관장소"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
+function ItemModal({form,field,editing,close,save,remove,saving,uploading,uploadPhoto}:{form:Form;field:<K extends keyof Form>(key:K,value:Form[K])=>void;editing:InventoryItem|null;close:()=>void;save:()=>void;remove:()=>void;saving:boolean;uploading:boolean;uploadPhoto:(f?:File)=>void}) {
+  const fields:Array<[keyof Form,string,string?]>=[
+    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형 *"],["acquired_date","취득일자","date"],["item_name","품명 *"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가","number"],["useful_life_years","내용년수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
   ];
-  return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><strong>{editing?"물품 수정":"물품 등록"}</strong><button className="btn small" onClick={close}><X size={14}/> 닫기</button></div><div className="modal-body">{editing&&<div className="detail-meta"><span>최종 수정일시</span><strong>{new Intl.DateTimeFormat("ko-KR",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(editing.updated_at))}</strong></div>}<div className="form-grid">{fields.map(([k,label,type])=><div className="field" key={k}><label>{label}</label><input className="input" type={type||"text"} value={form[k]} onChange={(e)=>field(k,e.target.value as never)}/></div>)}<div className="field full"><label>기타구성품</label><textarea className="textarea" rows={3} value={form.accessories} onChange={(e)=>field("accessories",e.target.value)}/></div><div className="field"><label>소속 물품대장</label><select className="select" value={form.organization} onChange={(e)=>field("organization",e.target.value as Organization)}><option>CBGC</option><option>CBCKL</option></select></div><div className="field"><label>물품사진</label><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e)=>{uploadPhoto(e.target.files?.[0]); e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden onChange={(e)=>{uploadPhoto(e.target.files?.[0]); e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 500KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div></div></div><div className="modal-foot">{editing&&<button className="btn danger" onClick={remove}><Trash2 size={15}/> 삭제</button>}<div style={{flex:1}}/><button className="btn" onClick={close}>취소</button><button className="btn primary" disabled={saving||uploading} onClick={save}>{saving?"저장 중...":"저장"}</button></div></div></div>;
+  const modified=editing?new Date(editing.updated_at):null;
+  return <div className="modal-backdrop"><div className="modal">
+    <div className="modal-head"><strong>{editing?"물품 수정 및 상세":"물품 등록"}</strong><button className="btn small" onClick={close}><X size={14}/> 닫기</button></div>
+    <div className="modal-body">{editing&&<div className="detail-meta"><span>최종 수정일시</span><strong>{modified&&!Number.isNaN(modified.getTime())?new Intl.DateTimeFormat("ko-KR",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Asia/Seoul"}).format(modified):"-"}</strong></div>}
+      <div className="form-grid">{fields.map(([key,label,inputType])=><div className="field" key={key}><label htmlFor={`item-${key}`}>{label}</label><input id={`item-${key}`} className="input" type={inputType||"text"} value={form[key]} min={key==="quantity"?0:undefined} step={key==="quantity"?1:undefined} onChange={e=>field(key,e.target.value as never)}/></div>)}
+        <div className="field full"><label>기타구성품</label><textarea className="textarea" rows={3} value={form.accessories} onChange={e=>field("accessories",e.target.value)}/></div>
+        <div className="field"><label>소속 물품대장</label><select className="select" value={form.organization} onChange={e=>field("organization",e.target.value as Organization)}><option>CBGC</option><option>CBCKL</option></select></div>
+        <div className="field"><label>물품사진</label><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 500KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div>
+      </div>
+    </div>
+    <div className="modal-foot">{editing&&<button className="btn danger" onClick={remove}><Trash2 size={15}/> 삭제</button>}<div style={{flex:1}}/><button className="btn" onClick={close}>취소</button><button className="btn primary" disabled={saving||uploading} onClick={save}>{saving?"저장 중...":"저장"}</button></div>
+  </div></div>;
 }
