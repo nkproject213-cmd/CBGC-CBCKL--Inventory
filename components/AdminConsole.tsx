@@ -184,15 +184,24 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     finally { setBulkManagerSaving(false); }
   }
   async function uploadExcel(file?: File) {
-    if (!file) return;
+    if (!file || excelUploading) return;
+    if (!file.name.toLowerCase().endsWith(".xlsx") || file.size > 4 * 1024 * 1024) {
+      alert("4MB 이하의 XLSX 파일을 선택해 주세요.");
+      if (excelInputRef.current) excelInputRef.current.value = "";
+      return;
+    }
+    if (!confirm(`${org} 물품대장에 엑셀을 반영하시겠습니까?\n\n같은 관리번호: 입력한 값만 수정\n빈칸·없는 열·엑셀에 없는 물품: 기존 내용 유지\n새 관리번호: 품명·물품유형이 있으면 신규 등록`)) {
+      if (excelInputRef.current) excelInputRef.current.value = "";
+      return;
+    }
     setExcelUploading(true);
     try {
       const fd = new FormData(); fd.append("file",file); fd.append("organization",org);
       const res = await fetch("/api/items/import", { method:"POST", body:fd });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "엑셀 업로드 실패");
-      const errorText = Array.isArray(body.errors) && body.errors.length ? `\n\n오류 내역:\n${body.errors.join("\n")}` : "";
-      alert(`엑셀 업로드 완료\n등록: ${body.created || 0}건\n실패: ${body.failed || 0}건${errorText}`); await load();
+      const errorText = Array.isArray(body.errors) && body.errors.length ? `\n\n오류 내역:\n${body.errors.join("\n")}${body.failed > body.errors.length ? `\n외 ${body.failed-body.errors.length}건` : ""}` : "";
+      alert(`엑셀 반영 완료\n신규 등록: ${body.created || 0}건\n수정: ${body.updated || 0}건\n변경 없음: ${body.unchanged || 0}건\n실패: ${body.failed || 0}건${errorText}`); await load();
     } catch (e) { alert(e instanceof Error ? e.message : "엑셀 업로드에 실패했습니다."); }
     finally { setExcelUploading(false); if(excelInputRef.current) excelInputRef.current.value=""; }
   }
@@ -258,6 +267,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
                 <button className="btn primary" onClick={openNew}><Plus size={16}/> 물품 등록</button>
               </div>
             </div>
+            <p style={{fontSize:12,color:"var(--muted)",margin:"0 0 12px"}}>엑셀 업로드는 관리번호 기준으로 입력한 값만 수정합니다. 빈칸·없는 열·엑셀에 없는 물품은 유지하며, 새 관리번호는 신규 등록됩니다.</p>
             <div className="card"><div className="toolbar">
               <input className="input" style={{maxWidth:340}} placeholder="관리번호, 품명, 장소, 책임자 검색" value={search} onChange={e=>setSearch(e.target.value)}/>
               <select className="select" style={{maxWidth:220}} value={type} onChange={e=>setType(e.target.value)}><option value="">전체 물품유형</option>{allTypes.map(t=><option key={t}>{t}</option>)}</select>
