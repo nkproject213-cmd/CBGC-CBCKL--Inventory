@@ -41,13 +41,14 @@ async function ensureSchema(sql: SqlClient) {
         )
       `;
 
-      // Additive migration: keep all existing items, public IDs and label settings.
-      // Unknown values remain NULL rather than inventing quantity, unit or status.
+      // Additive migration only. Existing records, values and public IDs stay intact.
+      // New optional fields remain NULL until explicitly supplied by an administrator.
       await sql`
         ALTER TABLE inventory_items
           ADD COLUMN IF NOT EXISTS unit TEXT,
           ADD COLUMN IF NOT EXISTS quantity INTEGER CHECK (quantity >= 0),
-          ADD COLUMN IF NOT EXISTS item_status TEXT
+          ADD COLUMN IF NOT EXISTS item_status TEXT,
+          ADD COLUMN IF NOT EXISTS model_name TEXT
       `;
 
       await sql`
@@ -115,7 +116,7 @@ export async function getPublicItem(publicId: string) {
     SELECT
       public_id, organization, manager_main, manager_sub, management_no,
       TO_CHAR(acquired_date, 'YYYY-MM-DD') AS acquired_date,
-      item_name, storage_location, specification, photo_url
+      item_name, model_name, storage_location, specification, photo_url
     FROM inventory_items
     WHERE public_id = ${publicId}
     LIMIT 1
@@ -133,12 +134,12 @@ export async function createItem(
   const rows = await sql`
     INSERT INTO inventory_items (
       id, public_id, organization, manager_main, manager_sub, management_no,
-      item_type, acquired_date, item_name, purchase_price, useful_life_years,
+      item_type, acquired_date, item_name, model_name, purchase_price, useful_life_years,
       storage_location, accessories, specification, classification_no,
       identification_no, photo_url, unit, quantity, item_status
     ) VALUES (
       ${id}, ${publicId}, ${data.organization}, ${data.manager_main}, ${data.manager_sub}, ${data.management_no},
-      ${data.item_type}, ${data.acquired_date}, ${data.item_name}, ${data.purchase_price}, ${data.useful_life_years},
+      ${data.item_type}, ${data.acquired_date}, ${data.item_name}, ${data.model_name ?? null}, ${data.purchase_price}, ${data.useful_life_years},
       ${data.storage_location}, ${data.accessories}, ${data.specification}, ${data.classification_no},
       ${data.identification_no}, ${data.photo_url}, ${data.unit ?? null}, ${data.quantity ?? null}, ${data.item_status ?? null}
     )
@@ -162,6 +163,7 @@ export async function updateItem(
       item_type = ${data.item_type},
       acquired_date = ${data.acquired_date},
       item_name = ${data.item_name},
+      model_name = ${data.model_name ?? null},
       purchase_price = ${data.purchase_price},
       useful_life_years = ${data.useful_life_years},
       storage_location = ${data.storage_location},

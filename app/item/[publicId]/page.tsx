@@ -14,7 +14,8 @@ export default async function PublicItemPage({ params }: { params: Promise<{ pub
   const color = item.organization === "CBGC" ? "#00a8a8" : "#ea5b96";
   const dark = item.organization === "CBGC" ? "#008c8c" : "#cf3d7d";
   const rows = [
-    ["품명", item.item_name], ["관리번호", item.management_no], ["규격", item.specification],
+    ["품명", item.item_name], ["모델명", item.model_name],
+    ["관리번호", item.management_no], ["규격", item.specification],
     ["취득일자", item.acquired_date], ["보관장소", item.storage_location],
     ["관리책임자(정)", item.manager_main], ["관리책임자(부)", item.manager_sub],
   ];

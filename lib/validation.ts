@@ -30,6 +30,7 @@ export const itemSchema = z.object({
   item_type: z.string().trim().min(1, "물품유형은 필수입니다."),
   acquired_date: nullableText,
   item_name: z.string().trim().min(1, "품명은 필수입니다."),
+  model_name: nullableText,
   purchase_price: nullableNumber,
   useful_life_years: nullableNumber,
   storage_location: nullableText,

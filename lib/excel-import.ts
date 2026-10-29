@@ -4,7 +4,7 @@ import type { Organization } from "./types";
 // These literal column names, never user input, are also the SQL allowlist.
 export const IMPORT_COLUMNS = {
   "관리책임자(정)": "manager_main", "관리책임자(부)": "manager_sub",
-  "물품유형": "item_type", "취득일자": "acquired_date", "품명": "item_name",
+  "물품유형": "item_type", "취득일자": "acquired_date", "품명": "item_name", "모델명": "model_name",
   "구매단가": "purchase_price", "내용년수": "useful_life_years",
   "보관장소": "storage_location", "기타구성품": "accessories", "규격": "specification",
   "물품분류번호": "classification_no", "물품식별번호": "identification_no",
@@ -36,8 +36,8 @@ function cellValue(cell: ExcelJS.Cell, header: string): Primitive {
   if (value == null) return null;
   if (typeof value === "string" || value instanceof Date) return value;
   if (typeof value === "number" && Number.isFinite(value)) {
-    // Preserve simple zero-padded identifiers; never strip leading zeroes from text IDs.
-    if (["관리번호", "물품분류번호", "물품식별번호"].includes(header)) {
+    // Preserve simple zero-padded identifiers, including numeric model codes.
+    if (["관리번호", "모델명", "물품분류번호", "물품식별번호"].includes(header)) {
       if (!Number.isSafeInteger(value)) throw new Error(`${header}: 번호를 텍스트 형식으로 입력해 주세요.`);
       if (/^0+$/.test(cell.numFmt || "")) return String(value).padStart(cell.numFmt.length, "0");
     }

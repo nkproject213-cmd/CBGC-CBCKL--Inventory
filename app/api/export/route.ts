@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
     { header: "물품유형", key: "item_type", width: 16 },
     { header: "취득일자", key: "acquired_date", width: 14 },
     { header: "품명", key: "item_name", width: 28 },
+    { header: "모델명", key: "model_name", width: 26 },
     { header: "구매단가", key: "purchase_price", width: 16 },
     { header: "내용년수", key: "useful_life_years", width: 12 },
     { header: "보관장소", key: "storage_location", width: 24 },
@@ -39,7 +40,8 @@ export async function GET(request: NextRequest) {
     cell.alignment = { vertical: "middle", horizontal: "center" };
   });
   sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.autoFilter = { from: "A1", to: "Q1" };
+  sheet.autoFilter = { from: "A1", to: "R1" };
+  sheet.getColumn("model_name").numFmt = "@";
   sheet.getColumn("purchase_price").numFmt = "#,##0";
   sheet.getColumn("quantity").numFmt = "0";
   const buffer = await workbook.xlsx.writeBuffer();

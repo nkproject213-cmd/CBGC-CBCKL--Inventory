@@ -4,7 +4,7 @@ import { isAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
 const HEADERS = [
-  "관리책임자(정)", "관리책임자(부)", "관리번호", "물품유형", "취득일자", "품명",
+  "관리책임자(정)", "관리책임자(부)", "관리번호", "물품유형", "취득일자", "품명", "모델명",
   "구매단가", "내용년수", "보관장소", "기타구성품", "규격",
   "물품분류번호", "물품식별번호", "물품사진URL", "단위", "수량", "상태",
 ];
@@ -18,10 +18,12 @@ export async function GET() {
   sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF00A8A8" } };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
-  const widths = [16,16,20,16,13,24,14,12,22,28,24,20,20,34,12,12,18];
+  const widths = [16,16,20,16,13,24,26,14,12,22,28,24,20,20,34,12,12,18];
   sheet.columns.forEach((column, index) => { column.width = widths[index]; });
-  [3,12,13].forEach(index => { sheet.getColumn(index).numFmt = "@"; });
-  sheet.getColumn(16).numFmt = "0";
+  ["관리번호", "모델명", "물품분류번호", "물품식별번호"].forEach(header => {
+    sheet.getColumn(HEADERS.indexOf(header) + 1).numFmt = "@";
+  });
+  sheet.getColumn(HEADERS.indexOf("수량") + 1).numFmt = "0";
   guide.mergeCells("A1:B1");
   guide.getCell("A1").value = "CBGC·CBCKL 물품대장 엑셀 업로드 작성안내";
   guide.getCell("A1").font = { bold: true, color: { argb: "FFFFFFFF" }, size: 14 };
@@ -31,9 +33,11 @@ export async function GET() {
     ["업로드 시트", "'물품업로드' 시트의 2행부터 입력합니다. 작성예시 시트는 업로드되지 않습니다. XLSX 4MB 이하, 최대 5,000행."],
     ["기존 물품 수정", "현재 대장의 관리번호가 같은 물품은 엑셀에 입력한 값만 수정합니다. 관리번호와 수정할 열만 있어도 됩니다."],
     ["기존 값 유지", "빈칸·공백·없는 열은 기존 값을 유지합니다. 엑셀에 없는 물품도 그대로 둡니다. 빈칸으로 기존 값을 삭제하지 않습니다."],
-    ["신규 등록 필수", "현재 대장에 없는 관리번호는 새로 등록합니다. 신규 등록에만 관리번호·물품유형·품명이 모두 필요합니다."],
+    ["신규 등록 필수", "현재 대장에 없는 관리번호는 새로 등록합니다. 신규 등록에만 관리번호·물품유형·품명이 모두 필요합니다. 모델명은 선택사항입니다."],
     ["소속 물품대장", "현재 선택한 CBGC 또는 CBCKL에만 반영됩니다. 다른 대장의 같은 관리번호는 변경하지 않습니다."],
     ["관리번호", "기존 관리번호와 정확히 일치하도록 입력합니다. 앞자리 0이 있는 번호는 텍스트 형식을 사용하세요. 관리번호 자체의 변경은 수정 및 상세에서 합니다."],
+    ["모델명", "품명과 별도 항목입니다. 예: SM-S938. 텍스트로 입력하며, 빈칸 또는 열 생략 시 기존 모델명을 유지합니다. QR 공개페이지에도 표시됩니다."],
+    ["기존 엑셀 양식", "모델명 열이 없는 이전 양식도 그대로 사용할 수 있습니다. 모델명만 수정하려면 관리번호·모델명 두 열만 입력하세요."],
     ["취득일자", "YYYY-MM-DD 형식. 예: 2026-10-06. 빈칸은 기존 날짜 유지."],
     ["구매단가 / 내용년수", "0 이상의 정수로 입력합니다. 예: 1500000 / 5. 0은 빈칸이 아니라 실제 수정값입니다."],
     ["보관장소 / 위치", "'위치'라는 열 이름도 사용할 수 있습니다. 두 열을 동시에 넣지는 마세요."],
@@ -49,11 +53,17 @@ export async function GET() {
   guide.getColumn(2).alignment = { wrapText: true, vertical: "middle" };
   guide.eachRow((row, index) => { if (index >= 4) row.height = 42; });
   example.addRow(HEADERS);
-  example.addRow(["홍길동","김영희","CBGC-2026-001","PC","2026-10-06","테스트 노트북",1500000,5,"게임센터 2층","충전기, 마우스","15인치 / 16GB","43211503","1234567890","","대",1,"사용 중"]);
-  example.addRow(["","","기존-관리번호-입력","","","","","","새 보관장소","","","","","","",0,""]);
+  // Map by header name so adding a field never shifts example values into another column.
+  const examples: Array<Record<string, string | number>> = [
+    { "관리책임자(정)":"홍길동", "관리책임자(부)":"김영희", "관리번호":"CBGC-2026-001", "물품유형":"PC", "취득일자":"2026-10-06", "품명":"테스트 노트북", "모델명":"EXAMPLE-001", "구매단가":1500000, "내용년수":5, "보관장소":"게임센터 2층", "기타구성품":"충전기, 마우스", "규격":"15인치 / 16GB", "물품분류번호":"43211503", "물품식별번호":"1234567890", "단위":"대", "수량":1, "상태":"사용 중" },
+    { "관리번호":"기존-관리번호-입력", "보관장소":"새 보관장소", "수량":0 },
+    { "관리번호":"모델명-수정할-관리번호", "모델명":"SM-S938" },
+  ];
+  examples.forEach(values => example.addRow(HEADERS.map(header => values[header] ?? "")));
   example.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   example.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6B7280" } };
   example.columns.forEach((column, index) => { column.width = widths[index]; });
+  example.getColumn(HEADERS.indexOf("모델명") + 1).numFmt = "@";
   const buffer = await workbook.xlsx.writeBuffer();
   const bytes = new Uint8Array(buffer.byteLength);
   bytes.set(new Uint8Array(buffer));

@@ -12,11 +12,11 @@ type SortKey = "default" | "management_no" | "item_name" | "item_type" | "acquir
 type SortDirection = "asc" | "desc";
 type Form = {
   organization: Organization; manager_main: string; manager_sub: string; management_no: string; item_type: string;
-  acquired_date: string; item_name: string; purchase_price: string; useful_life_years: string; storage_location: string;
+  acquired_date: string; item_name: string; model_name: string; purchase_price: string; useful_life_years: string; storage_location: string;
   accessories: string; specification: string; classification_no: string; identification_no: string; photo_url: string;
   unit: string; quantity: string; item_status: string;
 };
-const emptyForm = (org: Organization): Form => ({ organization: org, manager_main:"",manager_sub:"",management_no:"",item_type:"",acquired_date:"",item_name:"",purchase_price:"",useful_life_years:"",storage_location:"",accessories:"",specification:"",classification_no:"",identification_no:"",photo_url:"",unit:"",quantity:"",item_status:"" });
+const emptyForm = (org: Organization): Form => ({ organization: org, manager_main:"",manager_sub:"",management_no:"",item_type:"",acquired_date:"",item_name:"",model_name:"",purchase_price:"",useful_life_years:"",storage_location:"",accessories:"",specification:"",classification_no:"",identification_no:"",photo_url:"",unit:"",quantity:"",item_status:"" });
 
 const ITEM_PHOTO_TARGET_BYTES = 480 * 1024;
 async function compressItemPhoto(file: File): Promise<File> {
@@ -132,7 +132,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   function openNew() { setEditing(null); setForm(emptyForm(org)); }
   function openEdit(i: InventoryItem) {
     setEditing(i);
-    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type, acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:i.item_status||"" });
+    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type, acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, model_name:i.model_name||"", purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:i.item_status||"" });
   }
   function field<K extends keyof Form>(key: K, value: Form[K]) { setForm((p) => ({ ...p, [key]: value })); }
   async function uploadPhoto(file?: File) {
@@ -155,7 +155,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     if (quantity !== null && (!Number.isInteger(quantity) || quantity < 0 || quantity > 2147483647)) { alert("수량은 0 이상의 정수로 입력해 주세요."); return; }
     setSaving(true);
     try {
-      const payload = { ...form, quantity, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price === "" ? null : Number(form.purchase_price), useful_life_years:form.useful_life_years === "" ? null : Number(form.useful_life_years), acquired_date:form.acquired_date||null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
+      const payload = { ...form, model_name:form.model_name.trim()||null, quantity, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price === "" ? null : Number(form.purchase_price), useful_life_years:form.useful_life_years === "" ? null : Number(form.useful_life_years), acquired_date:form.acquired_date||null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
       const res = await fetch(editing ? `/api/items/${editing.id}` : "/api/items", { method: editing ? "PATCH" : "POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "저장에 실패했습니다.");
@@ -328,7 +328,7 @@ function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSele
 
 function ItemModal({form,field,editing,close,save,remove,saving,uploading,uploadPhoto}:{form:Form;field:<K extends keyof Form>(key:K,value:Form[K])=>void;editing:InventoryItem|null;close:()=>void;save:()=>void;remove:()=>void;saving:boolean;uploading:boolean;uploadPhoto:(f?:File)=>void}) {
   const fields:Array<[keyof Form,string,string?]>=[
-    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형 *"],["acquired_date","취득일자","date"],["item_name","품명 *"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가","number"],["useful_life_years","내용년수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
+    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형 *"],["acquired_date","취득일자","date"],["item_name","품명 *"],["model_name","모델명"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가","number"],["useful_life_years","내용년수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
   ];
   const modified=editing?new Date(editing.updated_at):null;
   return <div className="modal-backdrop"><div className="modal">
