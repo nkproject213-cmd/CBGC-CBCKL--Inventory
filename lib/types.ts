@@ -1,5 +1,4 @@
 export type Organization = "CBGC" | "CBCKL";
-
 export type InventoryItem = {
   id: string;
   public_id: string;
@@ -22,22 +21,13 @@ export type InventoryItem = {
   unit: string | null;
   quantity: number | null;
   item_status: string | null;
+  life_expiry_auto?: boolean;
+  status_before_life_expiry?: string | null;
   created_at: string;
   updated_at: string;
 };
-
-// Only explicitly approved fields are exposed on the anonymous public page.
-export type PublicInventoryItem = Pick<
-  InventoryItem,
-  | "public_id"
-  | "organization"
-  | "manager_main"
-  | "manager_sub"
-  | "management_no"
-  | "acquired_date"
-  | "item_name"
-  | "model_name"
-  | "storage_location"
-  | "specification"
-  | "photo_url"
+// Public reads remain an explicit allowlist, not all internal status/price fields.
+export type PublicInventoryItem = Pick<InventoryItem,
+  "public_id" | "organization" | "manager_main" | "manager_sub" | "management_no" |
+  "acquired_date" | "item_name" | "model_name" | "storage_location" | "specification" | "photo_url"
 >;

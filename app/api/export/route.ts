@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
   const org = organizationSchema.parse(request.nextUrl.searchParams.get("org")?.toUpperCase());
   const q = request.nextUrl.searchParams.get("q") || "";
   const type = request.nextUrl.searchParams.get("type") || "";
-  const items = await listItems(org, q, type);
+  const all = await listItems(org, q, type);
+  const items = request.nextUrl.searchParams.get("expired") === "1" ? all.filter(item => item.item_status === "내용연수 경과") : all;
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(org);
   sheet.columns = [

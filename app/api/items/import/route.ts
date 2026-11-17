@@ -2,14 +2,12 @@ import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { neon } from "@neondatabase/serverless";
 import { isAdmin } from "@/lib/auth";
-import { listItems } from "@/lib/db";
+import { listItems, syncExpiredStatuses } from "@/lib/db";
 import { organizationSchema } from "@/lib/validation";
 import { executeImport, planImport } from "@/lib/excel-import";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
 export async function POST(request: Request) {
   if (!(await isAdmin())) return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   try {
@@ -26,7 +24,6 @@ export async function POST(request: Request) {
     catch { return NextResponse.json({ error: "엑셀 파일을 읽을 수 없습니다. 암호가 없는 XLSX 파일을 사용해 주세요." }, { status: 400 }); }
     const sheet = workbook.getWorksheet("물품업로드") || workbook.worksheets[0];
     if (!sheet) return NextResponse.json({ error: "엑셀 시트를 찾을 수 없습니다." }, { status: 400 });
-    // This read also initializes the existing schema. It never changes item values.
     const existing = new Set((await listItems(org)).map(item => item.management_no));
     let plan: ReturnType<typeof planImport>;
     try { plan = planImport(sheet, existing, workbook.properties.date1904 === true); }
@@ -35,6 +32,7 @@ export async function POST(request: Request) {
     if (!url) throw new Error("DATABASE_URL is not configured");
     const sql = neon(url);
     const result = await executeImport(plan, org, (text, values) => sql.query(text, values));
+    await syncExpiredStatuses(org);
     return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("Excel import failed", error);
