@@ -45,6 +45,7 @@ export default function QRManagement({ org }: { org: Organization }) {
   const current: LabelData = items.find(item => item.public_id === itemId) || items[0] || SAMPLE;
   const image = imageFor(current, layout);
   const base = `/admin/${org.toLowerCase()}`;
+  const templatePath = org === "CBCKL" ? "/templates/cbckl-asset-label-template.png" : "/templates/asset-label-template.png";
   const colors = org === "CBGC" ? { primary: "#00a8a8", dark: "#008c8c" } : { primary: "#ea5b96", dark: "#cf3d7d" };
   const filtered = useMemo(() => items.filter(i => `${i.management_no} ${i.item_name}`.toLowerCase().includes(search.trim().toLowerCase())), [items, search]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / 12));
@@ -197,7 +198,7 @@ export default function QRManagement({ org }: { org: Organization }) {
       <div className={`content ${styles.content}`}>
         <div className={styles.pageHead}><div><div className={styles.eyebrow}>FORMTEC 3104 · 3 × 9</div><h2>라벨 레이아웃 편집</h2><p>QR · 이미지 · 정보를 원하는 위치에 배치해.</p></div><div className={styles.headActions}>
           <span className={styles.status}>{dirty ? "저장하지 않은 변경사항" : ready ? `${org} 전용 레이아웃` : "설정 불러오는 중"}</span>
-          <a className="btn" href="/templates/asset-label-template.png" download="물품-관리표찰-양식.png"><Download size={16}/> 라벨 양식 다운로드 (PNG)</a>
+          <a className="btn" href={templatePath} download={`${org}-물품-관리표찰-양식.png`}><Download size={16}/> 라벨 양식 다운로드 (PNG)</a>
           <button className="btn primary" disabled={!ready || busy || !!issues.length} onClick={save}><Save size={16}/>{saving ? "저장 중…" : "레이아웃 저장"}</button>
         </div></div>
         {loadError ? <div className={styles.error} role="alert">{loadError} <button className="btn small" onClick={() => location.reload()}>새로고침</button></div> : !ready ? <div className="card empty">레이아웃과 물품을 불러오는 중…</div> : <>
