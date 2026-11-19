@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Plus, Download, Upload, Camera, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
+import { compressItemPhoto } from "@/lib/item-photo";
 import PhotoArchiveButton from "@/components/PhotoArchiveButton";
 import { EXPIRED_STATUS, hasUsefulLifeExpired, koreaToday, usefulLifeEnd } from "@/lib/lifecycle";
 
@@ -17,33 +18,6 @@ type Form = {
   unit: string; quantity: string; item_status: string;
 };
 const emptyForm = (org: Organization): Form => ({ organization: org, manager_main:"",manager_sub:"",management_no:"",item_type:"",acquired_date:"",item_name:"",model_name:"",purchase_price:"",useful_life_years:"",storage_location:"",accessories:"",specification:"",classification_no:"",identification_no:"",photo_url:"",unit:"",quantity:"",item_status:"" });
-const ITEM_PHOTO_TARGET_BYTES = 480 * 1024;
-async function compressItemPhoto(file: File): Promise<File> {
-  if (file.size <= ITEM_PHOTO_TARGET_BYTES) return file;
-  const url = URL.createObjectURL(file);
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new window.Image(); img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("이미지를 불러올 수 없습니다.")); img.src = url;
-    });
-    let width = image.naturalWidth, height = image.naturalHeight;
-    if (Math.max(width, height) > 1800) { const ratio = 1800 / Math.max(width, height); width = Math.max(1, Math.round(width * ratio)); height = Math.max(1, Math.round(height * ratio)); }
-    let quality = 0.82; let lastBlob: Blob | null = null;
-    for (let attempt = 0; attempt < 18; attempt++) {
-      const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
-      const ctx = canvas.getContext("2d"); if (!ctx) throw new Error("사진 압축을 처리할 수 없습니다.");
-      ctx.drawImage(image, 0, 0, width, height);
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/webp", quality));
-      if (!blob) throw new Error("사진 압축에 실패했습니다."); lastBlob = blob;
-      if (blob.size <= ITEM_PHOTO_TARGET_BYTES) return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "item-photo"}.webp`, {type:"image/webp",lastModified:Date.now()});
-      if (quality > 0.5) quality = Math.max(0.5, quality - 0.08);
-      else { width = Math.max(480, Math.round(width * 0.82)); height = Math.max(360, Math.round(height * 0.82)); quality = 0.76; }
-    }
-    if (lastBlob && lastBlob.size <= 500 * 1024) return new File([lastBlob], `${file.name.replace(/\.[^.]+$/, "") || "item-photo"}.webp`, {type:"image/webp",lastModified:Date.now()});
-    throw new Error("사진을 500KB 이하로 압축하지 못했습니다.");
-  } finally { URL.revokeObjectURL(url); }
-}
-
 export default function AdminConsole({ org, section }: { org: Organization; section: Section }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -253,7 +227,7 @@ function ItemModal({form,field,editing,close,save,remove,saving,uploading,upload
     <p style={{fontSize:12,color:expired?"#b42318":"var(--muted)"}}>{end?`내용연수 도래일: ${end} · ${expired?"내용연수 경과로 자동 저장됩니다.":"아직 경과하지 않았습니다."}`:"취득일자와 내용연수를 입력하면 경과 상태를 자동 판정합니다."}{expired&&` 기존 상태: ${form.item_status||"미입력"} (별도 보관)`}</p>
     <div className="form-grid">{fields.map(([key,label,inputType])=><div className="field" key={key}><label htmlFor={`item-${key}`}>{label}</label><input id={`item-${key}`} className="input" type={inputType||"text"} value={key==="item_status"&&expired?EXPIRED_STATUS:form[key]} readOnly={key==="item_status"&&expired} min={key==="quantity"||key==="useful_life_years"?0:undefined} step={key==="quantity"||key==="useful_life_years"?1:undefined} onChange={e=>field(key,e.target.value as never)}/></div>)}
       <div className="field full"><label>기타구성품</label><textarea className="textarea" rows={3} value={form.accessories} onChange={e=>field("accessories",e.target.value)}/></div><div className="field"><label>소속 물품대장</label><select className="select" value={form.organization} onChange={e=>field("organization",e.target.value as Organization)}><option>CBGC</option><option>CBCKL</option></select></div>
-      <div className="field"><label>물품사진</label><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 500KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div>
+      <div className="field"><label>물품사진</label><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 250KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div>
     </div></div><div className="modal-foot">{editing&&<button className="btn danger" onClick={remove}><Trash2 size={15}/> 삭제</button>}<div style={{flex:1}}/><button className="btn" onClick={close}>취소</button><button className="btn primary" disabled={saving||uploading} onClick={save}>{saving?"저장 중...":"저장"}</button></div>
   </div></div>;
 }

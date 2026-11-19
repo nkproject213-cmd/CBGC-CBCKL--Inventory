@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import { isAdmin } from "@/lib/auth";
+import { compressStoredPhoto } from "@/lib/compress-stored-photo.mjs";
+import limits from "@/lib/photo-limits.json";
 
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_INPUT_BYTES = 5 * 1024 * 1024;
 
 export async function POST(request: Request) {
   if (!(await isAdmin())) {
@@ -14,7 +16,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get("file");
 
-    if (!(file instanceof File)) {
+    if (!(file instanceof File) || file.size === 0) {
       return NextResponse.json({ error: "파일이 없습니다." }, { status: 400 });
     }
     if (!ALLOWED.has(file.type)) {
@@ -23,19 +25,31 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (file.size > MAX_BYTES) {
+    if (file.size > MAX_INPUT_BYTES) {
       return NextResponse.json(
         { error: "파일 크기는 5MB 이하만 가능합니다." },
         { status: 400 }
       );
     }
 
+    let upload = file;
+    if (file.size > limits.maxBytes) {
+      try {
+        const bytes = await compressStoredPhoto(Buffer.from(await file.arrayBuffer()));
+        const name = file.name.replace(/\.[^.]+$/, "") || "image";
+        upload = new File([new Uint8Array(bytes)], `${name}.webp`, { type: "image/webp" });
+      } catch {
+        return NextResponse.json({ error: "이미지를 250KB 이하로 압축할 수 없습니다." }, { status: 422 });
+      }
+    }
+
     const blob = await put(
-      `inventory/${crypto.randomUUID()}-${file.name}`,
-      file,
+      `inventory/${crypto.randomUUID()}-${upload.name}`,
+      upload,
       {
         access: "public",
         addRandomSuffix: true,
+        contentType: upload.type,
       }
     );
 
