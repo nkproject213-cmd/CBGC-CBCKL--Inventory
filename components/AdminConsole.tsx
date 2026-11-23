@@ -112,7 +112,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     if (years !== null && (!Number.isInteger(years) || years < 0 || years > 9999)) { alert("내용연수는 0 이상 9,999 이하의 정수로 입력해 주세요."); return; }
     setSaving(true);
     try {
-      const payload = { ...form, model_name:form.model_name.trim()||null, quantity, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price === "" ? null : Number(form.purchase_price), useful_life_years:years, acquired_date:form.acquired_date||null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
+      const payload = { ...form, model_name:form.model_name.trim()||null, quantity, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price.trim() || null, useful_life_years:years, acquired_date:form.acquired_date||null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
       const res = await fetch(editing ? `/api/items/${editing.id}` : "/api/items", {method:editing?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
       const body = await res.json(); if (!res.ok) throw new Error(body.error || "저장에 실패했습니다.");
       setEditing(undefined);
@@ -217,7 +217,7 @@ function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSele
 }
 function ItemModal({form,field,editing,close,save,remove,saving,uploading,uploadPhoto}:{form:Form;field:<K extends keyof Form>(key:K,value:Form[K])=>void;editing:InventoryItem|null;close:()=>void;save:()=>void;remove:()=>void;saving:boolean;uploading:boolean;uploadPhoto:(f?:File)=>void}) {
   const fields:Array<[keyof Form,string,string?]>=[
-    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형"],["acquired_date","취득일자","date"],["item_name","품명"],["model_name","모델명"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가","number"],["useful_life_years","내용연수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
+    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형"],["acquired_date","취득일자","date"],["item_name","품명"],["model_name","모델명"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가"],["useful_life_years","내용연수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
   ];
   const modified=editing?new Date(editing.updated_at):null;
   const years=form.useful_life_years.trim()===""?null:Number(form.useful_life_years);

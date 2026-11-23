@@ -26,8 +26,9 @@ function sheet(headers, rows) {
   ws.addRow(headers); rows.forEach(row => ws.addRow(row));
   return ws;
 }
-const engine = loadTs('lib/excel-import.ts');
-const validation = loadTs('lib/validation.ts');
+const price = loadTs('lib/purchase-price.ts');
+const engine = loadTs('lib/excel-import.ts', { './purchase-price': price });
+const validation = loadTs('lib/validation.ts', { './purchase-price': price });
 assert.equal(engine.IMPORT_COLUMNS['품명'], 'item_name');
 assert.equal(engine.IMPORT_COLUMNS['모델명'], 'model_name');
 assert(!Object.hasOwn(engine.IMPORT_COLUMNS, '제품명'));
@@ -99,7 +100,9 @@ assert.equal(example.getCell('G4').value, 'SM-S938');
 const examplePlan = engine.planImport(example, new Set(['기존-관리번호-입력', '모델명-수정할-관리번호']));
 assert.equal(examplePlan.errors.length, 0);
 assert.deepEqual(examplePlan.updates[1].patch, { model_name: 'SM-S938' });
-const exportRoute = loadTs('app/api/export/route.ts', { 'next/server': { NextResponse }, '@/lib/auth': auth, '@/lib/db': { listItems: async () => [{ ...base, model_name: '0012', quantity: 0 }] }, '@/lib/validation': validation });
+const exportPrices = ['-', '미상', '1,234.5', 0, '=1+2', null];
+const exportItems = exportPrices.map((purchase_price, i) => ({ ...base, management_no: i ? 'PRICE-' + i : 'A', model_name: '0012', quantity: 0, purchase_price }));
+const exportRoute = loadTs('app/api/export/route.ts', { 'next/server': { NextResponse }, '@/lib/auth': auth, '@/lib/db': { listItems: async () => exportItems }, '@/lib/validation': validation, '@/lib/purchase-price': price });
 const exportResponse = await exportRoute.GET({ nextUrl: new URL('https://example.invalid/api/export?org=CBGC') });
 const exportBook = new ExcelJS.Workbook();
 await exportBook.xlsx.load(Buffer.from(await exportResponse.arrayBuffer()));
@@ -108,6 +111,10 @@ assert.equal(exported.getCell('F1').value, '품명');
 assert.equal(exported.getCell('G1').value, '모델명');
 assert.equal(exported.getCell('G2').value, '0012');
 assert.equal(exported.autoFilter, 'A1:R1');
+assert.deepEqual(exportPrices.map((_, i) => exported.getCell(i + 2, 8).value), ['-', '미상', 1234.5, 0, '=1+2', null]);
+assert.equal(exported.getCell('H6').type, ExcelJS.ValueType.String);
+const priceRoundTrip = engine.planImport(exported, new Set(exportItems.map(item => item.management_no)));
+assert.deepEqual(priceRoundTrip.updates.map(row => row.patch.purchase_price), ['-', '미상', 1234.5, 0, '=1+2', undefined]);
 assert.equal(engine.planImport(exported, existing).updates[0].patch.model_name, '0012');
 
 // Actual public-page rendering with read-only fixtures, including blank/XSS cases.

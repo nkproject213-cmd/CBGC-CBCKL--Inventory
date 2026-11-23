@@ -3,14 +3,24 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 async function load() {
-  if (process.env.IMPORT_NATIVE_TEST === '1') return import('../lib/excel-import.ts');
+  if (process.env.IMPORT_NATIVE_TEST === '1') {
+    const { registerHooks } = await import('node:module');
+    const hooks = registerHooks({ resolve(name, context, next) {
+      return next(name === './purchase-price' ? './purchase-price.ts' : name, context);
+    } });
+    try { return await import('../lib/excel-import.ts'); } finally { hooks.deregister(); }
+  }
   const ts = (await import('typescript')).default;
-  const source = fs.readFileSync(new URL('../lib/excel-import.ts', import.meta.url), 'utf8');
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, reportDiagnostics: true });
-  assert.equal(compiled.diagnostics?.length || 0, 0);
-  const module = { exports: {} };
-  new Function('require', 'module', 'exports', compiled.outputText)(require, module, module.exports);
-  return module.exports;
+  function compile(file, dependencies = {}) {
+    const source = fs.readFileSync(new URL('../lib/' + file, import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, reportDiagnostics: true });
+    assert.equal(compiled.diagnostics?.length || 0, 0);
+    const module = { exports: {} };
+    const scopedRequire = name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name);
+    new Function('require', 'module', 'exports', compiled.outputText)(scopedRequire, module, module.exports);
+    return module.exports;
+  }
+  return compile('excel-import.ts', { './purchase-price': compile('purchase-price.ts') });
 }
 const { planImport, executeImport, importDate, IMPORT_COLUMNS, UPDATE_IMPORT_SQL, INSERT_IMPORT_SQL } = await load();
 const cell = (value, numFmt = '') => ({ value, numFmt, text: value == null ? '' : String(value) });
@@ -90,13 +100,16 @@ result=await executeImport(parse([['관리번호'],['ONLY-ID']]),'CBGC',query);
 assert.equal(result.created,1); assert.equal(db.get('CBGC|ONLY-ID').item_name,''); assert.equal(db.get('CBGC|ONLY-ID').purchase_price,null);
 result=await executeImport(parse([['관리번호','구매단가'],[key,' ']]),'CBGC',query);
 assert.equal(result.unchanged,1); assert.equal(db.get('CBGC|'+key).purchase_price,4500);
-for (const zero of [0,'0']) {
-  const newKey='ZERO-'+typeof zero;
-  result=await executeImport(parse([['관리번호','구매단가'],[newKey,zero]]),'CBGC',query);
-  assert.equal(result.created,1); assert.equal(db.get('CBGC|'+newKey).purchase_price,0);
+const priceCases = [[0,0],['0',0],[' - ','-'],['미상','미상'],[123.45,123.45],['1,234.50',1234.5],['1,500',1500],['=1+2','=1+2']];
+for (const [index, [input, expected]] of priceCases.entries()) {
+  const newKey = 'PRICE-' + index;
+  result=await executeImport(parse([['관리번호','구매단가'],[newKey,input]]),'CBGC',query);
+  assert.equal(result.created,1); assert.equal(db.get('CBGC|'+newKey).purchase_price,expected);
   db.get('CBGC|'+key).purchase_price=4500;
-  result=await executeImport(parse([['관리번호','구매단가'],[key,zero]]),'CBGC',query);
-  assert.equal(result.updated,1); assert.equal(db.get('CBGC|'+key).purchase_price,0);
+  result=await executeImport(parse([['관리번호','구매단가'],[key,input]]),'CBGC',query);
+  assert.equal(result.updated,1); assert.equal(db.get('CBGC|'+key).purchase_price,expected);
+  result=await executeImport(parse([['관리번호','구매단가'],[key,'']]),'CBGC',query);
+  assert.equal(result.unchanged,1); assert.equal(db.get('CBGC|'+key).purchase_price,expected);
 }
 // A name and type supplied by a concurrent insert must survive a sparse import.
 plan=parse([['관리번호','품명','물품유형','구매단가'],['RACE','','',0]]);
@@ -125,12 +138,12 @@ if(process.env.IMPORT_NATIVE_TEST!=='1') {
   withoutType.addRow(['관리번호','품명']); withoutType.addRow(['NEW','새 물품']);
   const ids=workbook.addWorksheet('번호만'); ids.addRow(['관리번호']); ids.addRow(['ONLY-ID']);
   const prices=workbook.addWorksheet('구매단가'); prices.addRow(['관리번호','구매단가']);
-  prices.addRow(['N',0]); prices.addRow(['T','0']); prices.addRow([key,'']);
+  priceCases.forEach(([input], index) => prices.addRow(['PRICE-'+index,input])); prices.addRow([key,'']);
   const loaded=new ExcelJS.Workbook(); await loaded.xlsx.load(await workbook.xlsx.writeBuffer());
   assert.deepEqual(planImport(loaded.getWorksheet('유형 생략'),existing).creates[0].patch,{item_name:'새 물품'});
   assert.deepEqual(planImport(loaded.getWorksheet('번호만'),existing).creates[0].patch,{});
   const pricePlan=planImport(loaded.getWorksheet('구매단가'),existing);
-  assert.deepEqual(pricePlan.creates.map(row=>row.patch.purchase_price),[0,0]);
+  assert.deepEqual(pricePlan.creates.map(row=>row.patch.purchase_price),priceCases.map(([, expected])=>expected));
   assert.deepEqual(pricePlan.updates[0].patch,{});
   const roundtrip=planImport(loaded.getWorksheet('물품업로드'),existing);
   assert.deepEqual(roundtrip.updates[0].patch,{acquired_date:'2026-10-29',storage_location:'회의실',quantity:0});

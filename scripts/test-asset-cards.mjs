@@ -86,6 +86,34 @@ assert.equal(decoded.getWorksheet('CB-3').getImages().length,1);
 assert.equal(decoded.getWorksheet('CB-3').getRow(32).height,15.75);
 assert.equal(decoded.getWorksheet('CB-3').pageSetup.fitToHeight,1);
 assert.equal(decoded.getWorksheet('CB-3').getCell('E43').result,0);
+// Verify actual workbook cell types, display formats and cached formulas for flexible prices.
+const priceChunks = [];
+const priceBook = new cards.AssetCardWorkbook(template, { write: async bytes => priceChunks.push(bytes) });
+for (const [index, price] of ["-", "=1+1", "123.75", 0, "-10", null].entries()) {
+  await priceBook.add({ ...sample, management_no: `CBGC-${index + 1}`, purchase_price: price, useful_life_years: 3 }, null);
+}
+await priceBook.finish();
+const priceSheets = new ExcelJS.Workbook();
+await priceSheets.xlsx.load(Buffer.concat(priceChunks));
+for (const [index, expected] of ["-", "=1+1", 123.75, 0, -10, null].entries()) {
+  const sheet = priceSheets.getWorksheet(`CB-${index + 1}`);
+  assert.equal(sheet.getCell('C8').value, expected);
+  if (typeof expected === 'number' && expected >= 0) {
+    assert.equal(sheet.getCell('B32').result, expected);
+    assert.equal(sheet.getCell('C32').result, expected / 3);
+    assert.equal(sheet.getCell('E34').result, 0);
+    if (!Number.isInteger(expected)) {
+      for (const addr of ['C8', 'B32', 'C32', 'D32', 'E32']) {
+        assert.equal(sheet.getCell(addr).numFmt || 'General', 'General');
+      }
+    }
+  } else {
+    for (const addr of ['B32', 'C32', 'D32', 'E32']) {
+      assert.equal(sheet.getCell(addr).result || '', '');
+      assert.notEqual(sheet.getCell(addr).result, 0);
+    }
+  }
+}
 const smaller=[];const fitted=new cards.AssetCardWorkbook(template,{write:async b=>smaller.push(b)});
 await fitted.add({...sample,useful_life_years:20},null);await fitted.finish();
 const smallZip=await JSZip.loadAsync(Buffer.concat(smaller));

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { neon } from "@neondatabase/serverless";
 
 if (!process.env.DATABASE_URL) {
@@ -16,7 +17,7 @@ await sql`
     item_type TEXT NOT NULL,
     acquired_date DATE,
     item_name TEXT NOT NULL,
-    purchase_price BIGINT,
+    purchase_price TEXT,
     useful_life_years INTEGER,
     storage_location TEXT,
     accessories TEXT,
@@ -29,6 +30,8 @@ await sql`
     CONSTRAINT inventory_items_organization_management_no_key UNIQUE (organization, management_no)
   )
 `;
+const priceMigration = await readFile(new URL("../database/migrations/001-purchase-price-text.sql", import.meta.url), "utf8");
+await sql.query(priceMigration, []);
 await sql`CREATE INDEX IF NOT EXISTS idx_inventory_items_org ON inventory_items (organization)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_inventory_items_name ON inventory_items (item_name)`;
 console.log("inventory_items 테이블 준비 완료");

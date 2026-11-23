@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
-function loadTs(path) {
+function loadTs(path, stubs = {}) {
   const source = fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8');
   const result = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -12,11 +12,12 @@ function loadTs(path) {
   });
   assert.equal(result.diagnostics?.length || 0, 0, 'TypeScript parse errors in ' + path);
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', result.outputText)(require, module, module.exports);
+  new Function('require', 'module', 'exports', result.outputText)(name => Object.hasOwn(stubs, name) ? stubs[name] : require(name), module, module.exports);
   return module.exports;
 }
 const { labelFields, labelDate, renderQrLabelDocument } = loadTs('lib/qr-print.ts');
-const { itemSchema } = loadTs('lib/validation.ts');
+const price = loadTs('lib/purchase-price.ts');
+const { itemSchema } = loadTs('lib/validation.ts', { './purchase-price': price });
 const item = {
   public_id: '00257316-06de-4723-9876-5c7e5bcb4561',
   item_name: '테스트 물품', management_no: 'CBGC-1', specification: '15인치 / 16GB',
@@ -55,6 +56,14 @@ assert.equal(normalized.item_type, '');
 assert.equal(normalized.purchase_price, null);
 for (const price of [0, '0', ' 0 ']) {
   assert.equal(itemSchema.parse({ ...minimum, purchase_price: price }).purchase_price, 0);
+}
+for (const [input, expected] of [
+  ['-', '-'], [' 미상 ', '미상'], ['수리비 포함', '수리비 포함'], ['1,500.75', 1500.75],
+  ['-12.5', -12.5], ['1e-7', 1e-7], ['12,34', '12,34'],
+  ['9223372036854775807', '9223372036854775807'],
+  ['0.1234567890123456789', '0.1234567890123456789'],
+]) {
+  assert.equal(itemSchema.parse({ ...minimum, purchase_price: input }).purchase_price, expected);
 }
 for (const empty of [undefined, null, '', '  ']) {
   const parsed = itemSchema.parse({ ...minimum, item_name: empty, purchase_price: empty });

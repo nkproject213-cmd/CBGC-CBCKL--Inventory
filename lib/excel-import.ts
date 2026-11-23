@@ -1,4 +1,5 @@
 import type * as ExcelJS from "exceljs";
+import { normalizePurchasePrice } from "./purchase-price";
 import type { Organization } from "./types";
 
 // These literal column names, never user input, are also the SQL allowlist.
@@ -67,16 +68,17 @@ export function importDate(value: Primitive, date1904 = false): string {
 
 function convert(value: Primitive, header: string, key: ImportKey, date1904: boolean): string | number {
   if (key === "acquired_date") return importDate(value, date1904);
-  if (["quantity", "purchase_price", "useful_life_years"].includes(key)) {
+  if (key === "quantity" || key === "useful_life_years") {
     if (typeof value === "string" && !/^[+]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.0+)?$/.test(value.trim())) throw new Error(`${header}: 0 이상의 정수로 입력해 주세요.`);
     const number = typeof value === "number" ? value : Number(String(value).replaceAll(",", ""));
-    const maximum = key === "purchase_price" ? Number.MAX_SAFE_INTEGER : 2147483647;
+    const maximum = 2147483647;
     if (value instanceof Date || !Number.isSafeInteger(number) || number < 0 || number > maximum) throw new Error(`${header}: 0 이상 ${maximum} 이하의 정수로 입력해 주세요.`);
     return number;
   }
   if (value instanceof Date) throw new Error(`${header}: 날짜가 아닌 텍스트로 입력해 주세요.`);
   const text = String(value).trim();
   if (text.length > 20000) throw new Error(`${header}: 값이 너무 깁니다.`);
+  if (key === "purchase_price") return normalizePurchasePrice(value) ?? text;
   if (key === "photo_url") {
     try { const url = new URL(text); if (!["http:", "https:"].includes(url.protocol)) throw new Error(); }
     catch { throw new Error("물품사진URL: http 또는 https 이미지 주소를 입력해 주세요."); }

@@ -1,4 +1,5 @@
 import "server-only";
+import { normalizePurchasePrice } from "./purchase-price";
 import { neon } from "@neondatabase/serverless";
 import type { InventoryItem, Organization, PublicInventoryItem } from "@/lib/types";
 import { SYNC_LIFE_STATUS_SQL } from "@/lib/lifecycle";
@@ -25,7 +26,7 @@ async function ensureSchema(sql: SqlClient) {
           item_type TEXT NOT NULL,
           acquired_date DATE,
           item_name TEXT NOT NULL,
-          purchase_price BIGINT,
+          purchase_price TEXT,
           useful_life_years INTEGER,
           storage_location TEXT,
           accessories TEXT,
@@ -63,6 +64,13 @@ async function ensureSchema(sql: SqlClient) {
 }
 function normalizeRows<T>(rows: unknown): T[] { return rows as T[]; }
 
+function inventoryRows(rows: unknown): InventoryItem[] {
+  return normalizeRows<InventoryItem>(rows).map(item => ({
+    ...item,
+    purchase_price: normalizePurchasePrice(item.purchase_price),
+  }));
+}
+
 export async function syncExpiredStatuses(org: Organization | null = null, id: string | null = null) {
   const sql = sqlClient();
   await ensureSchema(sql);
@@ -92,14 +100,14 @@ export async function listItems(org: Organization, q = "", type = "") {
       AND (${type} = '' OR item_type = ${type})
     ORDER BY created_at DESC
   `;
-  return normalizeRows<InventoryItem>(rows);
+  return inventoryRows(rows);
 }
 export async function getItem(id: string) {
   const sql = sqlClient();
   await ensureSchema(sql);
   await sql.query(SYNC_LIFE_STATUS_SQL, [null, id]);
   const rows = await sql`SELECT inventory_items.*, TO_CHAR(acquired_date, 'YYYY-MM-DD') AS acquired_date FROM inventory_items WHERE id = ${id} LIMIT 1`;
-  return normalizeRows<InventoryItem>(rows)[0] ?? null;
+  return inventoryRows(rows)[0] ?? null;
 }
 export async function getPublicItem(publicId: string) {
   const sql = sqlClient();
@@ -165,7 +173,7 @@ export async function updateItem(id: string, data: Omit<InventoryItem, "id" | "p
 export async function deleteItem(id: string) {
   const sql = sqlClient(); await ensureSchema(sql);
   const rows = await sql`DELETE FROM inventory_items WHERE id = ${id} RETURNING *`;
-  return normalizeRows<InventoryItem>(rows)[0] ?? null;
+  return inventoryRows(rows)[0] ?? null;
 }
 export async function getLabelSettings(org: Organization) {
   const sql = sqlClient(); await ensureSchema(sql);

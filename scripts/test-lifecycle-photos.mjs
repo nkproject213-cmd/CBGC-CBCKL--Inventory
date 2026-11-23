@@ -57,7 +57,7 @@ assert.equal((await manifest.GET(request('ALL'))).status,401);assert.equal(calle
 admin=true;assert.equal((await manifest.GET(request('invalid'))).status,400);
 let body=await (await manifest.GET(request('CBGC'))).json();assert.equal(body.items.length,1);assert.equal(body.withoutPhoto,1);assert.deepEqual(called,['CBGC']);assert(!('purchase_price' in body.items[0]));
 body=await (await manifest.GET(request('ALL'))).json();assert.equal(body.items.length,2);assert.equal(body.withoutPhoto,2);
-const exportRoute=load('app/api/export/route.ts',{'next/server':{NextResponse},'@/lib/auth':{isAdmin:async()=>true},'@/lib/validation':{organizationSchema:{parse:value=>value}},'@/lib/db':{listItems:async()=>[{management_no:'A',item_status:'내용연수 경과'},{management_no:'B',item_status:'사용 중'}]}});
+const exportRoute=load('app/api/export/route.ts',{'@/lib/purchase-price':load('lib/purchase-price.ts'),'next/server':{NextResponse},'@/lib/auth':{isAdmin:async()=>true},'@/lib/validation':{organizationSchema:{parse:value=>value}},'@/lib/db':{listItems:async()=>[{management_no:'A',item_status:'내용연수 경과'},{management_no:'B',item_status:'사용 중'}]}});
 for(const filtered of [false,true]) {
   const response=await exportRoute.GET({nextUrl:new URL('https://example.invalid/api/export?org=CBGC'+(filtered?'&expired=1':''))});
   const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(await response.arrayBuffer()));

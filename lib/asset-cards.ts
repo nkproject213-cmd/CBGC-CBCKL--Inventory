@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { StoredZip, type ArchiveSink } from "./photo-archive";
 import { ASSET_CARD_TEMPLATE } from "./asset-card-template";
 import type { InventoryItem } from "./types";
+import { normalizePurchasePrice } from "./purchase-price";
 
 export type CardItem = Pick<InventoryItem, "organization" | "management_no" | "item_type" | "item_name" | "model_name" | "acquired_date" | "purchase_price" | "useful_life_years" | "manager_main" | "manager_sub" | "storage_location" | "accessories" | "specification" | "classification_no" | "identification_no" | "photo_url">;
 export type CardPhoto = { bytes: Uint8Array; width: number; height: number; extension: "jpg" | "png" };
@@ -69,16 +70,23 @@ class CardStyles {
     this.fonts = original.match(/<fonts[^>]*>([\s\S]*?)<\/fonts>/)![1].match(/<font>[\s\S]*?<\/font>/g)!;
     this.xfs = original.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)![1].match(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)!;
   }
-  style(base: number, size: number): number {
-    if (size >= 11) return base;
-    const key = `${base}:${size}`, existing = this.mapped.get(key);
+  style(base: number, size: number, showDecimals = false): number {
+    if (size >= 11 && !showDecimals) return base;
+    const key = `${base}:${size}:${showDecimals}`, existing = this.mapped.get(key);
     if (existing !== undefined) return existing;
-    const originalXf = this.xfs[base], fontId = Number(originalXf.match(/fontId="(\d+)"/)![1]);
-    const font = this.fonts[fontId].replace(/<sz val="[^"]*"\/>/, `<sz val="${size}"/>`);
-    let newFont = this.fonts.indexOf(font);
-    if (newFont < 0) { newFont = this.fonts.length; this.fonts.push(font); }
-    let xf = originalXf.replace(/fontId="\d+"/, `fontId="${newFont}"`);
-    if (!xf.includes('applyFont=')) xf = xf.replace('<xf ', '<xf applyFont="1" ');
+    let xf = this.xfs[base];
+    if (size < 11) {
+      const fontId = Number(xf.match(/fontId="(\d+)"/)![1]);
+      const font = this.fonts[fontId].replace(/<sz val="[^"]*"\/>/, `<sz val="${size}"/>`);
+      let newFont = this.fonts.indexOf(font);
+      if (newFont < 0) { newFont = this.fonts.length; this.fonts.push(font); }
+      xf = xf.replace(/fontId="\d+"/, `fontId="${newFont}"`);
+      if (!xf.includes('applyFont=')) xf = xf.replace('<xf ', '<xf applyFont="1" ');
+    }
+    if (showDecimals) {
+      xf = xf.replace(/numFmtId="\d+"/, 'numFmtId="0"');
+      if (!xf.includes('applyNumberFormat=')) xf = xf.replace('<xf ', '<xf applyNumberFormat="1" ');
+    }
     const id = this.xfs.length; this.xfs.push(xf); this.mapped.set(key, id); return id;
   }
   xml(): string {
@@ -86,11 +94,6 @@ class CardStyles {
     return this.original.replace(/<fonts[^>]*>[\s\S]*?<\/fonts>/, `<fonts count="${this.fonts.length}">${this.fonts.join("")}</fonts>`)
       .replace(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/, `<cellXfs count="${this.xfs.length}">${this.xfs.join("")}</cellXfs>`);
   }
-}
-function validPrice(item: CardItem): number | null {
-  const raw: unknown = item.purchase_price;
-  const value = typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : raw;
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 function acquired(item: CardItem): { text: string; year: number | null } {
   const match = String(item.acquired_date || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -116,18 +119,24 @@ function replaceCell(xml: string, address: string, cell: Cell): string {
   if (!found) throw new Error(`양식 셀을 찾을 수 없습니다: ${address}`);
   return result;
 }
-export function renderCardSheet(item: CardItem, name: string, template: Template, withPhoto: boolean, styleFor: (base:number,size:number)=>number = base=>base): string {
+export function renderCardSheet(item: CardItem, name: string, template: Template, withPhoto: boolean, styleFor: (base:number,size:number,showDecimals?:boolean)=>number = base=>base): string {
   const base = template.sheetXml;
   const sourceRows = base.match(/<sheetData>([\s\S]*?)<\/sheetData>/)![1];
   const allRows = sourceRows.match(/<row\b[^>]*>[\s\S]*?<\/row>/g)!;
   let fixedRows = allRows.filter(row => Number(row.match(/\br="(\d+)"/)![1]) <= 31).join("");
   const mergeRefs = [...base.matchAll(/<mergeCell ref="([^"]+)"\/>/g)].map(m=>m[1]);
   const merges = mergeRefs.filter(ref => Number(ref.match(/\d+/)![0]) < 32);
-  const date = acquired(item), price = validPrice(item), years = validYears(item);
+  const date = acquired(item), years = validYears(item);
+  const amount = normalizePurchasePrice(item.purchase_price);
+  const price = typeof amount === "number" && amount >= 0 ? amount : null;
+  const fractionalPrice = typeof amount === "number" && !Number.isInteger(amount);
+  if (fractionalPrice) {
+    fixedRows = fixedRows.replace(/(<c r="C8" s=")(\d+)"/, (_, prefix, style) => `${prefix}${styleFor(Number(style),11,true)}"`);
+  }
   const fields: Record<string,string|number|null> = {
     B1:name,C4:signature(item.manager_main),G4:signature(item.manager_sub),
     C6:item.management_no,G6:item.item_type,C7:date.text,G7:item.model_name,
-    C8:price,G8:null,C9:item.useful_life_years,G9:item.storage_location,
+    C8:amount,G8:null,C9:item.useful_life_years,G9:item.storage_location,
     C10:item.accessories,G10:item.specification,C11:item.classification_no,G11:item.identification_no,
   };
   for (const [ref,value] of Object.entries(fields)) fixedRows=replaceCell(fixedRows,ref,{value});
@@ -139,13 +148,19 @@ export function renderCardSheet(item: CardItem, name: string, template: Template
     const source=allRows.find(row=>row.startsWith(`<row r="${sourceNumber}"`))!;
     let row=source.replace(/\br="([A-Z]*)(\d+)"/g,(_,col)=>`r="${col}${rowNumber}"`)
       .replace(/\bht="[^"]*"/,`ht="${heights[index]}"`);
-    if(font<11) row=row.replace(/<c r="([A-Z]+)(\d+)" s="(\d+)"/g,(_,col,n,style)=>`<c r="${col}${n}" s="${col==="B"?style:styleFor(Number(style),font)}"`);
+    if (font < 11 || fractionalPrice) {
+      row = row.replace(/<c r="([A-Z]+)(\d+)" s="(\d+)"/g, (_, col, n, style) => {
+        const size = col === "B" ? 11 : font;
+        const decimals = fractionalPrice && /^[B-E]$/.test(col);
+        return `<c r="${col}${n}" s="${styleFor(Number(style),size,decimals)}"`;
+      });
+    }
     const put=(col:string,value:string|number|null,formula?:string)=>{row=replaceCell(row,`${col}${rowNumber}`,{value,formula});};
     const annual=years!==null&&price!==null?price/years:null;
     const cumulative=annual===null?null:Math.min(price!,annual*yearIndex);
     put("A",years===null?"":yearIndex,`IF(AND(ISNUMBER($C$9),$C$9>0,${yearIndex}<=$C$9),${yearIndex},"")`);
-    if(index===0)put("B",price,'IF(ISNUMBER($C$8),$C$8,"")');
-    put("C",annual??"",`IF(AND(ISNUMBER(A${rowNumber}),ISNUMBER($C$8)),$C$8/$C$9,"")`);
+    if(index===0)put("B",price,'IF(AND(ISNUMBER($C$8),$C$8>=0),$C$8,"")');
+    put("C",annual??"",`IF(AND(ISNUMBER(A${rowNumber}),ISNUMBER($C$8),$C$8>=0),$C$8/$C$9,"")`);
     put("D",cumulative??"",`IF(ISNUMBER(C${rowNumber}),MIN($C$8,SUM($C$32:C${rowNumber})),"")`);
     put("E",cumulative===null?"":Math.max(0,price!-cumulative),`IF(ISNUMBER(D${rowNumber}),MAX(0,$C$8-D${rowNumber}),"")`);
     put("G",years!==null&&date.year!==null?date.year+yearIndex-1:"",`IF(AND(ISNUMBER(A${rowNumber}),$C$7<>""),IFERROR(VALUE(LEFT($C$7,4))+A${rowNumber}-1,""),"")`);
@@ -179,7 +194,7 @@ export class AssetCardWorkbook {
     const name=cardSheetName(item.management_no),id=this.sheets.length+1;
     validateCardItems([item]);
     if(this.sheets.some(s=>s.name.toLowerCase()===name.toLowerCase()))throw new Error(`시트명 중복: ${name}`);
-    await this.addText(`xl/worksheets/sheet${id}.xml`,renderCardSheet(item,name,this.template,!!photo,(style,size)=>this.styles.style(style,size)));
+    await this.addText(`xl/worksheets/sheet${id}.xml`,renderCardSheet(item,name,this.template,!!photo,(style,size,showDecimals)=>this.styles.style(style,size,showDecimals)));
     if(photo){
       await this.zip.add(`xl/media/image${id}.${photo.extension}`,photo.bytes);
       await this.addText(`xl/drawings/drawing${id}.xml`,renderCardDrawing(photo,1,this.template));

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizePurchasePrice } from "./purchase-price";
 
 export const organizationSchema = z.enum(["CBGC", "CBCKL"]);
 
@@ -33,7 +34,7 @@ export const itemSchema = z.object({
   acquired_date: nullableText,
   item_name: textOrEmpty,
   model_name: nullableText,
-  purchase_price: nullableNumber,
+  purchase_price: z.union([z.number(), z.string()]).nullish().transform(normalizePurchasePrice),
   useful_life_years: nullableNumber,
   storage_location: nullableText,
   accessories: nullableText,

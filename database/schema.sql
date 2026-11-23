@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   item_type TEXT NOT NULL,
   acquired_date DATE,
   item_name TEXT NOT NULL,
-  purchase_price BIGINT,
+  purchase_price TEXT,
   useful_life_years INTEGER,
   storage_location TEXT,
   accessories TEXT,

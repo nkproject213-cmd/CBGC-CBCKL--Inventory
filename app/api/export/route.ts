@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { isAdmin } from "@/lib/auth";
 import { listItems } from "@/lib/db";
+import { normalizePurchasePrice } from "@/lib/purchase-price";
 import { organizationSchema } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
@@ -33,7 +34,14 @@ export async function GET(request: NextRequest) {
     { header: "수량", key: "quantity", width: 12 },
     { header: "상태", key: "item_status", width: 18 },
   ];
-  items.forEach(item => sheet.addRow(item));
+  sheet.getColumn("purchase_price").numFmt = "#,##0";
+  for (const item of items) {
+    const price = normalizePurchasePrice(item.purchase_price);
+    const row = sheet.addRow({ ...item, purchase_price: price });
+    if (typeof price === "number" && !Number.isInteger(price)) {
+      row.getCell("purchase_price").numFmt = "General";
+    }
+  }
   const color = org === "CBGC" ? "00A8A8" : "EA5B96";
   sheet.getRow(1).eachCell(cell => {
     cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -43,7 +51,6 @@ export async function GET(request: NextRequest) {
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.autoFilter = { from: "A1", to: "R1" };
   sheet.getColumn("model_name").numFmt = "@";
-  sheet.getColumn("purchase_price").numFmt = "#,##0";
   sheet.getColumn("quantity").numFmt = "0";
   const buffer = await workbook.xlsx.writeBuffer();
   const bytes = new Uint8Array(buffer.byteLength);

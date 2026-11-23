@@ -10,7 +10,7 @@ export type InventoryItem = {
   acquired_date: string | null;
   item_name: string;
   model_name: string | null;
-  purchase_price: number | null;
+  purchase_price: number | string | null;
   useful_life_years: number | null;
   storage_location: string | null;
   accessories: string | null;
