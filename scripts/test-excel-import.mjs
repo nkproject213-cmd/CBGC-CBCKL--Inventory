@@ -6,7 +6,7 @@ async function load() {
   if (process.env.IMPORT_NATIVE_TEST === '1') {
     const { registerHooks } = await import('node:module');
     const hooks = registerHooks({ resolve(name, context, next) {
-      return next(name === './purchase-price' ? './purchase-price.ts' : name, context);
+      return next(['./purchase-price','./flexible-fields'].includes(name) ? name + '.ts' : name, context);
     } });
     try { return await import('../lib/excel-import.ts'); } finally { hooks.deregister(); }
   }
@@ -20,7 +20,10 @@ async function load() {
     new Function('require', 'module', 'exports', compiled.outputText)(scopedRequire, module, module.exports);
     return module.exports;
   }
-  return compile('excel-import.ts', { './purchase-price': compile('purchase-price.ts') });
+  return compile('excel-import.ts', {
+    './purchase-price': compile('purchase-price.ts'),
+    './flexible-fields': compile('flexible-fields.ts'),
+  });
 }
 const { planImport, executeImport, importDate, IMPORT_COLUMNS, UPDATE_IMPORT_SQL, INSERT_IMPORT_SQL } = await load();
 const cell = (value, numFmt = '') => ({ value, numFmt, text: value == null ? '' : String(value) });
@@ -42,8 +45,14 @@ assert.deepEqual(parse([['관리번호','품명','물품유형'],['NEW',' ','PC'
 assert.match(parse([['관리번호','품명'],['','새 물품']]).errors[0],/관리번호/);
 assert.equal(parse([['관리번호','품명','물품유형'],['NEW','신규','PC']]).creates.length,1);
 assert.deepEqual(parse([['관리번호','품명','물품유형','관리책임자 (부)'],[key,'','   ','부 담당']]).updates[0].patch, {manager_sub:'부 담당'});
-for (const invalid of ['wrong', -1, 1.2, '1,2,3']) assert.equal(parse([['관리번호','수량'],[key,invalid]]).errors.length,1);
+for (const invalid of [-1, '1,2,3']) assert.equal(parse([['관리번호','수량'],[key,invalid]]).errors.length,1);
 assert.equal(parse([['관리번호','수량'],[key,'1,500']]).updates[0].patch.quantity,1500);
+const markerHeaders = ['관리번호','취득일자','내용연수','수량','물품사진URL'];
+const markers = { acquired_date:'확인 중', useful_life_years:'-', quantity:'1.25', photo_url:'미상' };
+const markerRow = [key, '확인 중', '-', 1.25, '미상'];
+assert.deepEqual(parse([markerHeaders, markerRow]).updates[0].patch, markers);
+assert.equal(parse([['관리번호','취득일자'],[key,'2023-02-29']]).errors.length,1);
+assert.equal(parse([['관리번호','수량'],[key,{error:'#N/A'}]]).errors.length,1);
 assert.equal(parse([['관리번호','수량'],[key,{formula:'1-1',result:0}]]).updates[0].patch.quantity,0);
 assert.deepEqual(parse([['관리번호','품명'],[key,{formula:'IF(1,"","")',result:''}]]).updates[0].patch,{});
 assert.equal(parse([['관리번호','품명'],[key,{formula:'A2'}]]).errors.length,1);
@@ -116,6 +125,25 @@ plan=parse([['관리번호','품명','물품유형','구매단가'],['RACE','','
 db.set('CBGC|RACE',{...original,management_no:'RACE'});
 result=await executeImport(plan,'CBGC',query); assert.equal(result.updated,1); assert.equal(db.get('CBGC|RACE').public_id,'keep-qr'); assert.equal(db.get('CBGC|RACE').photo_url,original.photo_url);
 assert.equal(db.get('CBGC|RACE').item_type,original.item_type); assert.equal(db.get('CBGC|RACE').item_name,original.item_name); assert.equal(db.get('CBGC|RACE').purchase_price,0);
+// Verify the actual sparse DB payload at the numeric/date vs text boundary.
+const captureUpdates = async rows => {
+  let payload;
+  const capture = async (sql, [,json]) => {
+    assert.equal(sql,UPDATE_IMPORT_SQL);
+    [payload]=JSON.parse(json);
+    return [{management_no:key,action:'updated'}];
+  };
+  const result=await executeImport(parse(rows),'CBGC',capture);
+  assert.equal(result.failed,0);
+  return payload;
+};
+assert.deepEqual(await captureUpdates([markerHeaders,markerRow]),{
+  management_no:key, acquired_date_text:'확인 중', useful_life_years_text:'-', quantity_text:'1.25', photo_url_text:'미상',
+});
+assert.deepEqual(await captureUpdates([markerHeaders,[key,'2024-02-29',0,1,'https://example.com/a.png']]),{
+  management_no:key, acquired_date:'2024-02-29', useful_life_years:0, quantity:1, photo_url:'https://example.com/a.png',
+});
+assert.deepEqual(await captureUpdates([markerHeaders,[key,'','  ','','']]),{management_no:key});
 // Another editor's change to an absent column is preserved at execution time.
 plan=parse([['관리번호','위치'],[key,'장소3']]);
 db.get('CBGC|'+key).manager_main='동시 수정';
@@ -139,9 +167,11 @@ if(process.env.IMPORT_NATIVE_TEST!=='1') {
   const ids=workbook.addWorksheet('번호만'); ids.addRow(['관리번호']); ids.addRow(['ONLY-ID']);
   const prices=workbook.addWorksheet('구매단가'); prices.addRow(['관리번호','구매단가']);
   priceCases.forEach(([input], index) => prices.addRow(['PRICE-'+index,input])); prices.addRow([key,'']);
+  const notes=workbook.addWorksheet('문자 표시'); notes.addRow(markerHeaders); notes.addRow(markerRow);
   const loaded=new ExcelJS.Workbook(); await loaded.xlsx.load(await workbook.xlsx.writeBuffer());
   assert.deepEqual(planImport(loaded.getWorksheet('유형 생략'),existing).creates[0].patch,{item_name:'새 물품'});
   assert.deepEqual(planImport(loaded.getWorksheet('번호만'),existing).creates[0].patch,{});
+  assert.deepEqual(planImport(loaded.getWorksheet('문자 표시'),existing).updates[0].patch,markers);
   const pricePlan=planImport(loaded.getWorksheet('구매단가'),existing);
   assert.deepEqual(pricePlan.creates.map(row=>row.patch.purchase_price),priceCases.map(([, expected])=>expected));
   assert.deepEqual(pricePlan.updates[0].patch,{});

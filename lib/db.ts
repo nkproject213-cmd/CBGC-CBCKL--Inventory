@@ -1,4 +1,5 @@
 import "server-only";
+import { isPhotoUrl, isTextFieldValue, type FlexibleField } from "./flexible-fields";
 import { normalizePurchasePrice } from "./purchase-price";
 import { neon } from "@neondatabase/serverless";
 import type { InventoryItem, Organization, PublicInventoryItem } from "@/lib/types";
@@ -46,7 +47,11 @@ async function ensureSchema(sql: SqlClient) {
           ADD COLUMN IF NOT EXISTS item_status TEXT,
           ADD COLUMN IF NOT EXISTS model_name TEXT,
           ADD COLUMN IF NOT EXISTS life_expiry_auto BOOLEAN NOT NULL DEFAULT FALSE,
-          ADD COLUMN IF NOT EXISTS status_before_life_expiry TEXT
+          ADD COLUMN IF NOT EXISTS status_before_life_expiry TEXT,
+          ADD COLUMN IF NOT EXISTS acquired_date_text TEXT,
+          ADD COLUMN IF NOT EXISTS useful_life_years_text TEXT,
+          ADD COLUMN IF NOT EXISTS quantity_text TEXT,
+          ADD COLUMN IF NOT EXISTS photo_url_text TEXT
       `;
       await sql`CREATE INDEX IF NOT EXISTS idx_inventory_items_org ON inventory_items (organization)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_inventory_items_name ON inventory_items (item_name)`;
@@ -64,11 +69,35 @@ async function ensureSchema(sql: SqlClient) {
 }
 function normalizeRows<T>(rows: unknown): T[] { return rows as T[]; }
 
+type StoredItem = Omit<InventoryItem, "acquired_date"> & {
+  acquired_date: string | Date | null;
+  acquired_date_text: string | null;
+  useful_life_years_text: string | null;
+  quantity_text: string | null;
+};
 function inventoryRows(rows: unknown): InventoryItem[] {
-  return normalizeRows<InventoryItem>(rows).map(item => ({
+  return normalizeRows<StoredItem>(rows).map(({ acquired_date_text, useful_life_years_text, quantity_text, ...item }) => ({
     ...item,
+    acquired_date: item.acquired_date instanceof Date ? item.acquired_date.toISOString().slice(0, 10) : (item.acquired_date ?? acquired_date_text),
+    useful_life_years: item.useful_life_years ?? useful_life_years_text,
+    quantity: item.quantity ?? quantity_text,
+    photo_url: isPhotoUrl(item.photo_url) ? item.photo_url : null,
+    photo_url_text: isPhotoUrl(item.photo_url) ? null : (item.photo_url_text ?? item.photo_url),
     purchase_price: normalizePurchasePrice(item.purchase_price),
   }));
+}
+
+function storedParts(key: FlexibleField, value: string | number | null) {
+  return isTextFieldValue(key, value) ? { value: null, note: value } : { value, note: null };
+}
+
+function itemParts(item: Pick<InventoryItem, FlexibleField>) {
+  return {
+    date: storedParts("acquired_date", item.acquired_date),
+    life: storedParts("useful_life_years", item.useful_life_years),
+    quantity: storedParts("quantity", item.quantity),
+    photo: storedParts("photo_url", item.photo_url),
+  };
 }
 
 export async function syncExpiredStatuses(org: Organization | null = null, id: string | null = null) {
@@ -114,27 +143,31 @@ export async function getPublicItem(publicId: string) {
   await ensureSchema(sql);
   const rows = await sql`
     SELECT public_id, organization, manager_main, manager_sub, management_no,
-      TO_CHAR(acquired_date, 'YYYY-MM-DD') AS acquired_date,
+      COALESCE(TO_CHAR(acquired_date, 'YYYY-MM-DD'), acquired_date_text) AS acquired_date,
       item_name, model_name, storage_location, specification, photo_url
     FROM inventory_items WHERE public_id = ${publicId} LIMIT 1
   `;
-  return normalizeRows<PublicInventoryItem>(rows)[0] ?? null;
+  const item = normalizeRows<PublicInventoryItem>(rows)[0];
+  return item ? { ...item, photo_url: isPhotoUrl(item.photo_url) ? item.photo_url : null } : null;
 }
 export async function createItem(data: Omit<InventoryItem, "id" | "public_id" | "created_at" | "updated_at">) {
   const sql = sqlClient();
   await ensureSchema(sql);
+  const parts = itemParts(data);
   const id = crypto.randomUUID(); const publicId = crypto.randomUUID();
   await sql`
     INSERT INTO inventory_items (
       id, public_id, organization, manager_main, manager_sub, management_no,
       item_type, acquired_date, item_name, model_name, purchase_price, useful_life_years,
       storage_location, accessories, specification, classification_no,
-      identification_no, photo_url, unit, quantity, item_status
+      identification_no, photo_url, unit, quantity, item_status,
+      acquired_date_text, useful_life_years_text, quantity_text, photo_url_text
     ) VALUES (
       ${id}, ${publicId}, ${data.organization}, ${data.manager_main}, ${data.manager_sub}, ${data.management_no},
-      ${data.item_type}, ${data.acquired_date}, ${data.item_name}, ${data.model_name ?? null}, ${data.purchase_price}, ${data.useful_life_years},
+      ${data.item_type}, ${parts.date.value}, ${data.item_name}, ${data.model_name ?? null}, ${data.purchase_price}, ${parts.life.value},
       ${data.storage_location}, ${data.accessories}, ${data.specification}, ${data.classification_no},
-      ${data.identification_no}, ${data.photo_url}, ${data.unit ?? null}, ${data.quantity ?? null}, ${data.item_status ?? null}
+      ${data.identification_no}, ${parts.photo.value}, ${data.unit ?? null}, ${parts.quantity.value}, ${data.item_status ?? null},
+      ${parts.date.note}, ${parts.life.note}, ${parts.quantity.note}, ${parts.photo.note}
     )
   `;
   const item = await getItem(id);
@@ -144,6 +177,7 @@ export async function createItem(data: Omit<InventoryItem, "id" | "public_id" | 
 export async function updateItem(id: string, data: Omit<InventoryItem, "id" | "public_id" | "created_at" | "updated_at">) {
   const sql = sqlClient();
   await ensureSchema(sql);
+  const parts = itemParts(data);
   const rows = await sql`
     UPDATE inventory_items SET
       organization = ${data.organization},
@@ -151,19 +185,23 @@ export async function updateItem(id: string, data: Omit<InventoryItem, "id" | "p
       manager_sub = ${data.manager_sub},
       management_no = ${data.management_no},
       item_type = ${data.item_type},
-      acquired_date = ${data.acquired_date},
+      acquired_date = ${parts.date.value},
+      acquired_date_text = ${parts.date.note},
       item_name = ${data.item_name},
       model_name = ${data.model_name ?? null},
       purchase_price = ${data.purchase_price},
-      useful_life_years = ${data.useful_life_years},
+      useful_life_years = ${parts.life.value},
+      useful_life_years_text = ${parts.life.note},
       storage_location = ${data.storage_location},
       accessories = ${data.accessories},
       specification = ${data.specification},
       classification_no = ${data.classification_no},
       identification_no = ${data.identification_no},
-      photo_url = ${data.photo_url},
+      photo_url = ${parts.photo.value},
+      photo_url_text = ${parts.photo.note},
       unit = ${data.unit ?? null},
-      quantity = ${data.quantity ?? null},
+      quantity = ${parts.quantity.value},
+      quantity_text = ${parts.quantity.note},
       item_status = ${data.item_status ?? null},
       updated_at = NOW()
     WHERE id = ${id} RETURNING id

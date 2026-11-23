@@ -27,9 +27,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!before) return NextResponse.json({ error: "물품을 찾을 수 없습니다." }, { status: 404 });
     // Older open tabs do not submit the new fields; preserve their stored values.
     const payload = await request.json();
-    const data = itemSchema.parse({ ...before, ...payload });
+    const data = itemSchema.parse({ ...before, photo_url: before.photo_url ?? before.photo_url_text, ...payload });
     const item = await updateItem(id, data);
-    if (before.photo_url && before.photo_url !== item?.photo_url && before.photo_url.includes("blob.vercel-storage.com")) del(before.photo_url).catch(console.error);
+    if (before.photo_url && before.photo_url !== item?.photo_url && !item?.photo_url_text && before.photo_url.includes("blob.vercel-storage.com")) del(before.photo_url).catch(console.error);
     return NextResponse.json({ item });
   } catch (error) { return errorResponse(error); }
 }

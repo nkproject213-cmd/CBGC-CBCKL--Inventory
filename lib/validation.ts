@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeAcquiredDate, normalizeCount, normalizePhotoInput } from "./flexible-fields";
 import { normalizePurchasePrice } from "./purchase-price";
 
 export const organizationSchema = z.enum(["CBGC", "CBCKL"]);
@@ -10,20 +11,17 @@ const nullableText = z.union([z.string().trim(), z.null()]).optional().transform
 
 const textOrEmpty = nullableText.transform(value => value ?? "");
 
-const nullableNumber = z.union([z.number(), z.string().trim(), z.null()]).optional().transform((v) => {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  return n;
-});
+function checked<T, R>(normalize: (value: T) => R) {
+  return (value: T, ctx: z.RefinementCtx): R => {
+    try { return normalize(value); }
+    catch (error) {
+      ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "입력값을 확인해 주세요." });
+      return z.NEVER;
+    }
+  };
+}
 
-const nullableQuantity = z.preprocess((value) => {
-  if (value == null || (typeof value === "string" && !value.trim())) return null;
-  if (typeof value === "string") return Number(value.replaceAll(",", "").trim());
-  return value;
-}, z.number().int("수량은 정수로 입력해 주세요.")
-  .min(0, "수량은 0 이상이어야 합니다.")
-  .max(2147483647, "수량이 너무 큽니다.").nullable());
+const flexibleCount = z.union([z.number(), z.string()]).nullish().transform(checked(normalizeCount));
 
 export const itemSchema = z.object({
   organization: organizationSchema,
@@ -31,18 +29,18 @@ export const itemSchema = z.object({
   manager_sub: nullableText,
   management_no: z.string("관리번호는 필수입니다.").trim().min(1, "관리번호는 필수입니다."),
   item_type: textOrEmpty,
-  acquired_date: nullableText,
+  acquired_date: nullableText.transform(checked(normalizeAcquiredDate)),
   item_name: textOrEmpty,
   model_name: nullableText,
   purchase_price: z.union([z.number(), z.string()]).nullish().transform(normalizePurchasePrice),
-  useful_life_years: nullableNumber,
+  useful_life_years: flexibleCount,
   storage_location: nullableText,
   accessories: nullableText,
   specification: nullableText,
   classification_no: nullableText,
   identification_no: nullableText,
-  photo_url: nullableText,
+  photo_url: nullableText.transform(checked(normalizePhotoInput)),
   unit: nullableText,
-  quantity: nullableQuantity,
+  quantity: flexibleCount,
   item_status: nullableText,
 });

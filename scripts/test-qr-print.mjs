@@ -17,7 +17,8 @@ function loadTs(path, stubs = {}) {
 }
 const { labelFields, labelDate, renderQrLabelDocument } = loadTs('lib/qr-print.ts');
 const price = loadTs('lib/purchase-price.ts');
-const { itemSchema } = loadTs('lib/validation.ts', { './purchase-price': price });
+const fields = loadTs('lib/flexible-fields.ts');
+const { itemSchema } = loadTs('lib/validation.ts', { './purchase-price': price, './flexible-fields': fields });
 const item = {
   public_id: '00257316-06de-4723-9876-5c7e5bcb4561',
   item_name: '테스트 물품', management_no: 'CBGC-1', specification: '15인치 / 16GB',
@@ -31,6 +32,8 @@ assert.equal(labelFields({ ...item, unit: null })[3][1], '-');
 assert.equal(labelFields({ ...item, quantity: null })[4][1], '-');
 assert.equal(labelDate(new Date('2025-06-09T00:00:00Z')), '2025-06-09');
 assert.equal(labelDate(null), '-');
+assert.equal(labelDate('2020-01-01 이전'), '2020-01-01 이전');
+assert.equal(labelFields({ ...item, quantity: '미상' })[4][1], '미상');
 const qr = new Map([[item.public_id, '<svg viewBox="0 0 10 10"></svg>']]);
 for (const count of [0,1,27,28,54,1500]) {
   const html = renderQrLabelDocument('CBGC', Array.from({length: count}, (_,i) => ({ ...item, management_no: 'CBGC-' + i })), qr);
@@ -76,6 +79,14 @@ assert.equal(itemSchema.parse({ ...base, quantity: 0 }).quantity, 0);
 assert.equal(itemSchema.parse({ ...base, quantity: '1,500' }).quantity, 1500);
 assert.equal(itemSchema.parse({ ...base, quantity: '' }).quantity, null);
 assert.equal(itemSchema.safeParse({ ...base, quantity: -1 }).success, false);
-assert.equal(itemSchema.safeParse({ ...base, quantity: 1.2 }).success, false);
-assert.equal(itemSchema.safeParse({ ...base, quantity: 'wrong' }).success, false);
+assert.equal(itemSchema.parse({ ...base, quantity: 1.2 }).quantity, '1.2');
+assert.equal(itemSchema.parse({ ...base, quantity: '확인 중' }).quantity, '확인 중');
+assert.equal(itemSchema.safeParse({ ...base, quantity: '12,34' }).success, false);
+assert.equal(itemSchema.safeParse({ ...base, acquired_date: '2026-02-30' }).success, false);
+assert.equal(itemSchema.parse({ ...base, acquired_date: '2024. 2. 29.' }).acquired_date, '2024-02-29');
+assert.equal(itemSchema.parse({ ...base, acquired_date: '2026년경' }).acquired_date, '2026년경');
+assert.equal(itemSchema.parse({ ...base, useful_life_years: '-' }).useful_life_years, '-');
+assert.equal(itemSchema.parse({ ...base, photo_url: '사진 미등록' }).photo_url, '사진 미등록');
+for (const url of ['javascript:alert(1)', 'https://user:pass@example.com/x', '//example.com/x'])
+  assert.equal(itemSchema.safeParse({ ...base, photo_url: url }).success, false);
 console.log('QR print regression checks passed (10 fields, escaping, blank/zero, pagination through 1,500 items, quantity validation).');

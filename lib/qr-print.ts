@@ -22,8 +22,7 @@ export function labelDate(value: unknown): string {
     return Number.isNaN(value.getTime()) ? "-" : value.toISOString().slice(0, 10);
   }
   const text = String(value).trim();
-  // SQL DATE is already YYYY-MM-DD. Do not apply a timezone offset.
-  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : text || "-";
+  return text || "-";
 }
 
 export function labelFields(item: LabelItem): Array<[string, string]> {

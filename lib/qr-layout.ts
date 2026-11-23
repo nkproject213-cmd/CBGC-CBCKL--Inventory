@@ -101,11 +101,7 @@ export function escapeLayoutText(value: unknown): string {
 export function fieldValue(item: LabelData, key: FieldKey): string {
   const value: unknown = item[key];
   if (value == null || value === "") return "-";
-  if (key === "acquired_date") {
-    if (value instanceof Date) return Number.isNaN(value.getTime()) ? "-" : value.toISOString().slice(0, 10);
-    const text = String(value).trim();
-    return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : text || "-";
-  }
+  if (key === "acquired_date" && value instanceof Date) return Number.isNaN(value.getTime()) ? "-" : value.toISOString().slice(0, 10);
   return String(value).trim() || "-";
 }
 export function imageFor(item: LabelData, layout: QrLayout): string | null {

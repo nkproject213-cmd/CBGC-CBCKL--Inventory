@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   sheet.getColumn("purchase_price").numFmt = "#,##0";
   for (const item of items) {
     const price = normalizePurchasePrice(item.purchase_price);
-    const row = sheet.addRow({ ...item, purchase_price: price });
+    const row = sheet.addRow({ ...item, purchase_price: price, photo_url: item.photo_url ?? item.photo_url_text ?? null });
     if (typeof price === "number" && !Number.isInteger(price)) {
       row.getCell("purchase_price").numFmt = "General";
     }

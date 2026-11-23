@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, Download, X } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
+import { isPhotoUrl } from "@/lib/flexible-fields";
 import type { CardPhoto } from "@/lib/asset-cards";
 
 type Disk = { write(bytes: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> };
@@ -90,7 +91,7 @@ export default function AssetCardButton({org}:{org:Organization}) {
       }
       for(let index=0;index<snapshot.length;index++){
         abort.signal.throwIfAborted();const item=snapshot[index];let photo:CardPhoto|null=null;
-        if(item.photo_url){try{photo=await cardPhoto(item.photo_url,abort.signal);}catch(error){abort.signal.throwIfAborted();failures.push(`${item.management_no}: ${error instanceof Error?error.message:"사진 처리 실패"}`);}}
+        if(isPhotoUrl(item.photo_url)){try{photo=await cardPhoto(item.photo_url,abort.signal);}catch(error){abort.signal.throwIfAborted();failures.push(`${item.management_no}: ${error instanceof Error?error.message:"사진 처리 실패"}`);}}
         else missing++;
         if(!disk&&book.sheetCount&&(book.sheetCount>=100||book.bytesWritten+(photo?.bytes.length||0)>MAX_PART))await finishPart(false);
         await book.add(item,photo);if(photo)photos++;setProgress(index+1);
@@ -116,7 +117,7 @@ export default function AssetCardButton({org}:{org:Organization}) {
         <p style={{fontSize:12,color:"var(--muted)"}}>대상은 현재 {org} 대장 전체야. 목록 화면의 검색·체크박스 선택과는 별개이며, 위 옵션으로 경과 물품만 고를 수 있어.</p>
         <p style={{fontSize:12,color:"var(--muted)"}}>일렬번호·수리이력은 공백. 감가상각은 원본 수식 기준이며, 감가상각 구역의 전체 높이는 그대로 두고 내용연수에 맞춰 행 수·셀 높이를 조정해. 카드 1개는 A4 1페이지야. 취득원가나 내용연수가 없으면 해당 계산칸은 공백으로 둬. 내용연수가 길수록 해당 구역의 글자가 작아질 수 있어.</p>
         <p style={{fontSize:12,color:"var(--muted)"}}>직접 파일 저장이 지원되면 엑셀 하나로 저장해. 미지원 브라우저는 최대 100개 시트 또는 약 64MB마다 나눠 저장하므로 각 파일의 저장 버튼을 눌러줘. 완료 전 페이지를 닫지 마.</p>
-        {loading?<p>물품 불러오는 중...</p>:<p><strong>대상 {selected.length}개</strong> / 사진 등록 {selected.filter(i=>i.photo_url).length}개</p>}
+        {loading?<p>물품 불러오는 중...</p>:<p><strong>대상 {selected.length}개</strong> / 사진 등록 {selected.filter(i=>isPhotoUrl(i.photo_url)).length}개</p>}
         {running&&<progress max={selected.length||1} value={progress} style={{width:"100%"}}/>}
         <p role="status" style={{fontSize:13,whiteSpace:"pre-wrap"}}>{message}</p>
         {part&&<button className="btn primary" onClick={savePart}><Download size={15}/> 이 엑셀 저장 후 계속</button>}

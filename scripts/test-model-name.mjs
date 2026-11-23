@@ -27,8 +27,10 @@ function sheet(headers, rows) {
   return ws;
 }
 const price = loadTs('lib/purchase-price.ts');
-const engine = loadTs('lib/excel-import.ts', { './purchase-price': price });
-const validation = loadTs('lib/validation.ts', { './purchase-price': price });
+const fields = loadTs('lib/flexible-fields.ts');
+const fieldDependencies = { './purchase-price': price, './flexible-fields': fields };
+const engine = loadTs('lib/excel-import.ts', fieldDependencies);
+const validation = loadTs('lib/validation.ts', fieldDependencies);
 assert.equal(engine.IMPORT_COLUMNS['품명'], 'item_name');
 assert.equal(engine.IMPORT_COLUMNS['모델명'], 'model_name');
 assert(!Object.hasOwn(engine.IMPORT_COLUMNS, '제품명'));
@@ -102,6 +104,7 @@ assert.equal(examplePlan.errors.length, 0);
 assert.deepEqual(examplePlan.updates[1].patch, { model_name: 'SM-S938' });
 const exportPrices = ['-', '미상', '1,234.5', 0, '=1+2', null];
 const exportItems = exportPrices.map((purchase_price, i) => ({ ...base, management_no: i ? 'PRICE-' + i : 'A', model_name: '0012', quantity: 0, purchase_price }));
+Object.assign(exportItems[0], { acquired_date:'확인 중', useful_life_years:'-', quantity:'1.5', photo_url_text:'사진 준비 중' });
 const exportRoute = loadTs('app/api/export/route.ts', { 'next/server': { NextResponse }, '@/lib/auth': auth, '@/lib/db': { listItems: async () => exportItems }, '@/lib/validation': validation, '@/lib/purchase-price': price });
 const exportResponse = await exportRoute.GET({ nextUrl: new URL('https://example.invalid/api/export?org=CBGC') });
 const exportBook = new ExcelJS.Workbook();
@@ -115,12 +118,20 @@ assert.deepEqual(exportPrices.map((_, i) => exported.getCell(i + 2, 8).value), [
 assert.equal(exported.getCell('H6').type, ExcelJS.ValueType.String);
 const priceRoundTrip = engine.planImport(exported, new Set(exportItems.map(item => item.management_no)));
 assert.deepEqual(priceRoundTrip.updates.map(row => row.patch.purchase_price), ['-', '미상', 1234.5, 0, '=1+2', undefined]);
+assert.equal(priceRoundTrip.updates[0].patch.acquired_date,'확인 중');
+assert.equal(priceRoundTrip.updates[0].patch.useful_life_years,'-');
+assert.equal(priceRoundTrip.updates[0].patch.quantity,'1.5');
+assert.equal(priceRoundTrip.updates[0].patch.photo_url,'사진 준비 중');
 assert.equal(engine.planImport(exported, existing).updates[0].patch.model_name, '0012');
 
 // Actual public-page rendering with read-only fixtures, including blank/XSS cases.
 let publicItem = { ...base };
-const publicPage = loadTs('app/item/[publicId]/page.tsx', {
+const photo = loadTs('components/ItemPhoto.tsx', {
   'next/image': props => React.createElement('img', { src: props.src, alt: props.alt }),
+  '@/lib/flexible-fields': fields,
+});
+const publicPage = loadTs('app/item/[publicId]/page.tsx', {
+  '@/components/ItemPhoto': photo,
   'next/link': props => React.createElement('a', { href: props.href }, props.children),
   'next/navigation': { notFound() { throw new Error('not found'); } },
   '@/lib/db': { getPublicItem: async () => publicItem }, '@/lib/auth': { isAdmin: async () => false },

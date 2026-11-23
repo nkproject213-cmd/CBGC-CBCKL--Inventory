@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
+import { isPhotoUrl } from "@/lib/flexible-fields";
 import { listItems } from "@/lib/db";
 import type { Organization } from "@/lib/types";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const orgs: Organization[] = scope === "ALL" ? ["CBGC", "CBCKL"] : [scope];
     const all = (await Promise.all(orgs.map(org => listItems(org)))).flat();
-    const photos = all.filter(item => item.photo_url?.trim()).sort((a, b) => a.organization.localeCompare(b.organization) || a.management_no.localeCompare(b.management_no, "ko", { numeric: true }));
+    const photos = all.filter(item => isPhotoUrl(item.photo_url)).sort((a, b) => a.organization.localeCompare(b.organization) || a.management_no.localeCompare(b.management_no, "ko", { numeric: true }));
     return NextResponse.json({
       total: all.length, withoutPhoto: all.length - photos.length,
       items: photos.map(({ id, organization, management_no, item_name, photo_url }) => ({ id, organization, management_no, item_name, photo_url })),

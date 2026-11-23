@@ -23,6 +23,8 @@ assert(moved.x >= .5 && moved.y + moved.height <= 29.61);
 const item = { public_id:'test-id', item_name:'테스트 물품', management_no:'CBGC-001', specification:'15인치', acquired_date:'2025-06-09', storage_location:'게임센터', manager_main:'홍길동', manager_sub:'김영희', photo_url:null };
 assert.equal(fieldValue({...item, acquired_date: new Date('2025-06-09T00:00:00Z')},'acquired_date'),'2025-06-09');
 assert.equal(fieldValue({...item, specification:null},'specification'),'-');
+assert.equal(fieldValue({...item, acquired_date: '2025-06-09 이전'},'acquired_date'),'2025-06-09 이전');
+assert(!renderLayoutDocument('CBGC',[{...item,photo_url:'미상'}],new Map([['test-id','<svg/>']]),defaultLayout()).includes('<img'));
 const qr = new Map([['test-id','<svg viewBox="0 0 10 10"></svg>']]);
 for (const count of [0,1,27,28,54,1500]) {
   const html=renderLayoutDocument('CBGC',Array.from({length:count},()=>item),qr,defaultLayout());

@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { StoredZip, type ArchiveSink } from "./photo-archive";
 import { ASSET_CARD_TEMPLATE } from "./asset-card-template";
 import type { InventoryItem } from "./types";
+import { isStoredDate } from "./flexible-fields";
 import { normalizePurchasePrice } from "./purchase-price";
 
 export type CardItem = Pick<InventoryItem, "organization" | "management_no" | "item_type" | "item_name" | "model_name" | "acquired_date" | "purchase_price" | "useful_life_years" | "manager_main" | "manager_sub" | "storage_location" | "accessories" | "specification" | "classification_no" | "identification_no" | "photo_url">;
@@ -96,8 +97,10 @@ class CardStyles {
   }
 }
 function acquired(item: CardItem): { text: string; year: number | null } {
-  const match = String(item.acquired_date || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return match ? { text: `${match[1]}.${Number(match[2])}.${Number(match[3])}.`, year: Number(match[1]) } : { text: "", year: null };
+  const text = item.acquired_date || "";
+  if (!isStoredDate(text)) return {text, year:null};
+  const [year, month, day] = text.split("-");
+  return {text:`${year}.${Number(month)}.${Number(day)}.`, year:Number(year)};
 }
 function signature(name: string | null): string {
   const value = (name || "").trim();
@@ -163,7 +166,9 @@ export function renderCardSheet(item: CardItem, name: string, template: Template
     put("C",annual??"",`IF(AND(ISNUMBER(A${rowNumber}),ISNUMBER($C$8),$C$8>=0),$C$8/$C$9,"")`);
     put("D",cumulative??"",`IF(ISNUMBER(C${rowNumber}),MIN($C$8,SUM($C$32:C${rowNumber})),"")`);
     put("E",cumulative===null?"":Math.max(0,price!-cumulative),`IF(ISNUMBER(D${rowNumber}),MAX(0,$C$8-D${rowNumber}),"")`);
-    put("G",years!==null&&date.year!==null?date.year+yearIndex-1:"",`IF(AND(ISNUMBER(A${rowNumber}),$C$7<>""),IFERROR(VALUE(LEFT($C$7,4))+A${rowNumber}-1,""),"")`);
+    const yearFormula = date.year === null && date.text ? undefined
+      : `IF(AND(ISNUMBER(A${rowNumber}),$C$7<>""),IFERROR(VALUE(LEFT($C$7,4))+A${rowNumber}-1,""),"")`;
+    put("G",years!==null&&date.year!==null?date.year+yearIndex-1:"",yearFormula);
     body.push(row);
   }
   if(count>1)merges.push(`B32:B${31+count}`);

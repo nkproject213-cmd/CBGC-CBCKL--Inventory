@@ -1,5 +1,6 @@
 import type * as ExcelJS from "exceljs";
 import { normalizePurchasePrice } from "./purchase-price";
+import { FLEXIBLE_FIELDS, isTextFieldValue, normalizeAcquiredDate, normalizeCount, normalizePhotoInput } from "./flexible-fields";
 import type { Organization } from "./types";
 
 // These literal column names, never user input, are also the SQL allowlist.
@@ -58,31 +59,23 @@ export function importDate(value: Primitive, date1904 = false): string {
     const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 31);
     return new Date(epoch + (date1904 || day < 60 ? day : day - 1) * 86400000).toISOString().slice(0, 10);
   }
-  const match = String(value ?? "").trim().match(/^(\d{4})[-./]\s*(\d{1,2})[-./]\s*(\d{1,2})(?:\.|T\d{2}:\d{2}.*)?$/);
-  if (!match) throw new Error("취득일자: YYYY-MM-DD 형식으로 입력해 주세요.");
-  const [, y, m, d] = match;
-  const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
-  if (Number(y) < 100 || date.getUTCFullYear() !== Number(y) || date.getUTCMonth() !== Number(m) - 1 || date.getUTCDate() !== Number(d)) throw new Error("취득일자: 존재하지 않는 날짜입니다.");
-  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  if (value && value.length > 20000) throw new Error("취득일자: 값이 너무 깁니다.");
+  const result = normalizeAcquiredDate(value);
+  if (result == null) throw new Error("취득일자를 입력해 주세요.");
+  return result;
 }
 
 function convert(value: Primitive, header: string, key: ImportKey, date1904: boolean): string | number {
   if (key === "acquired_date") return importDate(value, date1904);
-  if (key === "quantity" || key === "useful_life_years") {
-    if (typeof value === "string" && !/^[+]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.0+)?$/.test(value.trim())) throw new Error(`${header}: 0 이상의 정수로 입력해 주세요.`);
-    const number = typeof value === "number" ? value : Number(String(value).replaceAll(",", ""));
-    const maximum = 2147483647;
-    if (value instanceof Date || !Number.isSafeInteger(number) || number < 0 || number > maximum) throw new Error(`${header}: 0 이상 ${maximum} 이하의 정수로 입력해 주세요.`);
-    return number;
-  }
   if (value instanceof Date) throw new Error(`${header}: 날짜가 아닌 텍스트로 입력해 주세요.`);
   const text = String(value).trim();
   if (text.length > 20000) throw new Error(`${header}: 값이 너무 깁니다.`);
-  if (key === "purchase_price") return normalizePurchasePrice(value) ?? text;
-  if (key === "photo_url") {
-    try { const url = new URL(text); if (!["http:", "https:"].includes(url.protocol)) throw new Error(); }
-    catch { throw new Error("물품사진URL: http 또는 https 이미지 주소를 입력해 주세요."); }
+  if (key === "quantity" || key === "useful_life_years") {
+    try { return normalizeCount(value) ?? text; }
+    catch (error) { throw new Error(`${header}: ${error instanceof Error ? error.message : "입력값을 확인해 주세요."}`); }
   }
+  if (key === "purchase_price") return normalizePurchasePrice(value) ?? text;
+  if (key === "photo_url") return normalizePhotoInput(text) ?? text;
   return text;
 }
 
@@ -137,18 +130,30 @@ export function planImport(sheet: ExcelJS.Worksheet, existing: ReadonlySet<strin
   return plan;
 }
 
-const merged = KEYS.map(key => `COALESCE(p.${key}, i.${key})`);
-// Missing JSON fields become SQL NULL. COALESCE preserves the CURRENT database
-// value, not a stale read/merge snapshot, including concurrent edits to other fields.
+function supportsText(key: ImportKey): key is typeof FLEXIBLE_FIELDS[number] {
+  return FLEXIBLE_FIELDS.some(field => field === key);
+}
+const storedColumns = KEYS.flatMap<{ column: string; other?: string }>(key => {
+  if (!supportsText(key)) return [{ column: key }];
+  const literal = key + "_text";
+  return [{ column: key, other: literal }, { column: literal, other: key }];
+});
+const columns = storedColumns.map(({ column }) => column);
+// A supplied typed value clears its old text (and vice versa). When neither was
+// supplied, keep both live columns, including changes made since the file was parsed.
+const merged = storedColumns.map(({ column, other }) => {
+  const current = `COALESCE(p.${column}, i.${column})`;
+  return other ? `CASE WHEN p.${other} IS NOT NULL THEN NULL ELSE ${current} END` : current;
+});
 export const UPDATE_IMPORT_SQL = `
 WITH incoming AS (SELECT * FROM jsonb_populate_recordset(NULL::inventory_items, $2::jsonb)),
 changed AS (
   UPDATE inventory_items AS i SET
-    ${KEYS.map((key, index) => `${key} = ${merged[index]}`).join(",\n    ")},
+    ${columns.map((key, index) => `${key} = ${merged[index]}`).join(",\n    ")},
     updated_at = NOW()
   FROM incoming AS p
   WHERE i.organization = $1 AND i.management_no = p.management_no
-    AND ROW(${merged.join(", ")}) IS DISTINCT FROM ROW(${KEYS.map(key => `i.${key}`).join(", ")})
+    AND ROW(${merged.join(", ")}) IS DISTINCT FROM ROW(${columns.map(key => `i.${key}`).join(", ")})
   RETURNING i.management_no
 )
 SELECT p.management_no,
@@ -158,12 +163,12 @@ SELECT p.management_no,
 FROM incoming AS p LEFT JOIN changed AS c ON c.management_no = p.management_no`;
 
 // Only new rows need a storage default. Keep the patch sparse for conflict updates.
-const insertValues = KEYS.map(key =>
+const insertValues = columns.map(key =>
   key === "item_name" || key === "item_type" ? `COALESCE(p.${key}, '')` : `p.${key}`
 );
 export const INSERT_IMPORT_SQL = `
 WITH incoming AS (SELECT * FROM jsonb_populate_recordset(NULL::inventory_items, $2::jsonb))
-INSERT INTO inventory_items (id, public_id, organization, management_no, ${KEYS.join(", ")})
+INSERT INTO inventory_items (id, public_id, organization, management_no, ${columns.join(", ")})
 SELECT gen_random_uuid(), gen_random_uuid(), $1, p.management_no, ${insertValues.join(", ")} FROM incoming AS p
 ON CONFLICT (organization, management_no) DO NOTHING
 RETURNING management_no, 'created'::text AS action`;
@@ -173,7 +178,9 @@ function payload(rows: ImportRow[]) {
     const data: Record<string, string | number> = { management_no: row.management_no };
     for (const key of KEYS) {
       const value = row.patch[key];
-      if (value !== undefined && value !== null && String(value).trim() !== "") data[key] = value;
+      if (value === undefined || value === null || String(value).trim() === "") continue;
+      const column = supportsText(key) && isTextFieldValue(key, value) ? key + "_text" : key;
+      data[column] = value;
     }
     return data;
   }));

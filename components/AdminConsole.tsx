@@ -1,12 +1,13 @@
 "use client";
-import Image from "next/image";
+import ItemPhoto from "@/components/ItemPhoto";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Plus, Download, Upload, Camera, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
 import { compressItemPhoto } from "@/lib/item-photo";
 import PhotoArchiveButton from "@/components/PhotoArchiveButton";
-import { EXPIRED_STATUS, hasUsefulLifeExpired, koreaToday, usefulLifeEnd } from "@/lib/lifecycle";
+import { isStoredDate, isPhotoUrl, normalizeAcquiredDate, normalizeCount } from "@/lib/flexible-fields";
+import { EXPIRED_STATUS, koreaToday, usefulLifeEnd } from "@/lib/lifecycle";
 
 type Section = "dashboard" | "items";
 type SortKey = "default" | "management_no" | "item_name" | "item_type" | "acquired_date" | "storage_location" | "manager_main" | "updated_at";
@@ -90,7 +91,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   function openNew() { setEditing(null); setForm(emptyForm(org)); }
   function openEdit(i: InventoryItem) {
     setEditing(i);
-    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type || "", acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, model_name:i.model_name||"", purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:(i.life_expiry_auto ? i.status_before_life_expiry : i.item_status)||"" });
+    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type || "", acquired_date:i.acquired_date || "", item_name:i.item_name, model_name:i.model_name||"", purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url ?? i.photo_url_text ?? "", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:(i.life_expiry_auto ? i.status_before_life_expiry : i.item_status)||"" });
   }
   function field<K extends keyof Form>(key: K, value: Form[K]) { setForm(p => ({...p,[key]:value})); }
   async function uploadPhoto(file?: File) {
@@ -106,13 +107,9 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   }
   async function save() {
     if (!form.management_no.trim()) { alert("관리번호를 입력해 주세요."); return; }
-    const quantity = form.quantity.trim() === "" ? null : Number(form.quantity);
-    if (quantity !== null && (!Number.isInteger(quantity) || quantity < 0 || quantity > 2147483647)) { alert("수량은 0 이상의 정수로 입력해 주세요."); return; }
-    const years = form.useful_life_years.trim() === "" ? null : Number(form.useful_life_years);
-    if (years !== null && (!Number.isInteger(years) || years < 0 || years > 9999)) { alert("내용연수는 0 이상 9,999 이하의 정수로 입력해 주세요."); return; }
     setSaving(true);
     try {
-      const payload = { ...form, model_name:form.model_name.trim()||null, quantity, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price.trim() || null, useful_life_years:years, acquired_date:form.acquired_date||null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
+      const payload = { ...form, model_name:form.model_name.trim()||null, quantity:form.quantity.trim() || null, unit:form.unit.trim()||null, item_status:form.item_status.trim()||null, purchase_price:form.purchase_price.trim() || null, useful_life_years:form.useful_life_years.trim() || null, acquired_date:form.acquired_date.trim() || null, manager_main:form.manager_main||null, manager_sub:form.manager_sub||null, storage_location:form.storage_location||null, accessories:form.accessories||null, specification:form.specification||null, classification_no:form.classification_no||null, identification_no:form.identification_no||null, photo_url:form.photo_url||null };
       const res = await fetch(editing ? `/api/items/${editing.id}` : "/api/items", {method:editing?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
       const body = await res.json(); if (!res.ok) throw new Error(body.error || "저장에 실패했습니다.");
       setEditing(undefined);
@@ -210,24 +207,38 @@ function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSele
   const selectable=Boolean(!compact&&selectedIds&&onToggleSelected&&onToggleAll), allSelected=selectable&&items.every(i=>selectedIds?.has(i.id));
   return <div className="table-wrap"><table><thead><tr>{selectable&&<th style={{width:42,textAlign:"center"}}><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allSelected} onChange={e=>onToggleAll?.(e.target.checked)}/></th>}<th>사진</th><th>관리번호</th><th>품명</th><th>물품유형</th>{!compact&&<><th>규격</th><th>취득일자</th><th>상태</th></>}<th>보관장소</th><th>관리책임자(정)</th>{!compact&&<th>관리</th>}</tr></thead><tbody>{items.map(i=><tr key={i.id}>
     {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} checked={selectedIds?.has(i.id)||false} onChange={()=>onToggleSelected?.(i.id)}/></td>}
-    <td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name || "-"}</strong></td><td>{i.item_type || "-"}</td>
-    {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date?.slice(0,10)||"-"}</td><td><span style={i.item_status===EXPIRED_STATUS?{fontWeight:700,color:"#b42318",whiteSpace:"nowrap"}:undefined}>{i.item_status||"-"}</span></td></>}
+    <td>{isPhotoUrl(i.photo_url)?<ItemPhoto className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name || "-"}</strong></td><td>{i.item_type || "-"}</td>
+    {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date || "-"}</td><td><span style={i.item_status===EXPIRED_STATUS?{fontWeight:700,color:"#b42318",whiteSpace:"nowrap"}:undefined}>{i.item_status||"-"}</span></td></>}
     <td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>{!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank" rel="noreferrer"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}
   </tr>)}</tbody></table></div>;
 }
 function ItemModal({form,field,editing,close,save,remove,saving,uploading,uploadPhoto}:{form:Form;field:<K extends keyof Form>(key:K,value:Form[K])=>void;editing:InventoryItem|null;close:()=>void;save:()=>void;remove:()=>void;saving:boolean;uploading:boolean;uploadPhoto:(f?:File)=>void}) {
-  const fields:Array<[keyof Form,string,string?]>=[
-    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형"],["acquired_date","취득일자","date"],["item_name","품명"],["model_name","모델명"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가"],["useful_life_years","내용연수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
+  const fields:Array<[keyof Form,string]>=[
+    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형"],["acquired_date","취득일자"],["item_name","품명"],["model_name","모델명"],["unit","단위"],["quantity","수량"],["item_status","상태"],["purchase_price","구매단가"],["useful_life_years","내용연수"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
   ];
   const modified=editing?new Date(editing.updated_at):null;
-  const years=form.useful_life_years.trim()===""?null:Number(form.useful_life_years);
-  const expired=hasUsefulLifeExpired(form.acquired_date,years), end=usefulLifeEnd(form.acquired_date,years);
+  const end = useMemo(() => {
+    try {
+      const years = normalizeCount(form.useful_life_years, 9999);
+      const date = normalizeAcquiredDate(form.acquired_date);
+      return typeof years === "number" ? usefulLifeEnd(date, years) : null;
+    } catch {
+      return null;
+    }
+  }, [form.acquired_date, form.useful_life_years]);
+  const expired = end !== null && end <= koreaToday();
   return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><strong>{editing?"물품 수정 및 상세":"물품 등록"}</strong><button className="btn small" onClick={close}><X size={14}/> 닫기</button></div><div className="modal-body">
     {editing&&<div className="detail-meta"><span>최종 수정일시</span><strong>{modified&&!Number.isNaN(modified.getTime())?new Intl.DateTimeFormat("ko-KR",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Asia/Seoul"}).format(modified):"-"}</strong></div>}
     <p style={{fontSize:12,color:expired?"#b42318":"var(--muted)"}}>{end?`내용연수 도래일: ${end} · ${expired?"내용연수 경과로 자동 저장됩니다.":"아직 경과하지 않았습니다."}`:"취득일자와 내용연수를 입력하면 경과 상태를 자동 판정합니다."}{expired&&` 기존 상태: ${form.item_status||"미입력"} (별도 보관)`}</p>
-    <div className="form-grid">{fields.map(([key,label,inputType])=><div className="field" key={key}><label htmlFor={`item-${key}`}>{label}</label><input id={`item-${key}`} className="input" type={inputType||"text"} value={key==="item_status"&&expired?EXPIRED_STATUS:form[key]} readOnly={key==="item_status"&&expired} min={key==="quantity"||key==="useful_life_years"?0:undefined} step={key==="quantity"||key==="useful_life_years"?1:undefined} onChange={e=>field(key,e.target.value as never)}/></div>)}
+    <div className="form-grid">{fields.map(([key,label]) => <div className="field" key={key}>
+      <label htmlFor={`item-${key}`}>{label}</label>
+      {key === "acquired_date" ? <div className="date-entry">
+        <input id="item-acquired_date" className="input" value={form.acquired_date} placeholder="YYYY-MM-DD 또는 미상" onChange={e=>field(key,e.target.value)}/>
+        <span className="btn date-picker">달력<input type="date" aria-label="달력에서 취득일자 선택" value={isStoredDate(form.acquired_date) ? form.acquired_date : ""} onChange={e=>field(key,e.target.value)}/></span>
+      </div> : <input id={`item-${key}`} className="input" value={key==="item_status"&&expired?EXPIRED_STATUS:form[key]} readOnly={key==="item_status"&&expired} onChange={e=>field(key,e.target.value as never)}/>}
+    </div>)}
       <div className="field full"><label>기타구성품</label><textarea className="textarea" rows={3} value={form.accessories} onChange={e=>field("accessories",e.target.value)}/></div><div className="field"><label>소속 물품대장</label><select className="select" value={form.organization} onChange={e=>field("organization",e.target.value as Organization)}><option>CBGC</option><option>CBCKL</option></select></div>
-      <div className="field"><label>물품사진</label><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 250KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{form.photo_url&&<Image className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div>
+      <div className="field"><label htmlFor="item-photo-url">물품사진</label><input className="input" id="item-photo-url" value={form.photo_url} placeholder="사진 URL 또는 메모" onChange={e=>field("photo_url",e.target.value)}/><div className="actions"><label className="btn"><Upload size={15}/> 사진 선택<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label><label className="btn"><Camera size={15}/> 카메라 촬영<input type="file" accept="image/*" capture="environment" hidden disabled={uploading} onChange={e=>{uploadPhoto(e.target.files?.[0]);e.currentTarget.value="";}}/></label></div><small>업로드 전 자동으로 250KB 이하로 압축됩니다.</small>{uploading&&<small> 사진 압축 및 업로드 중...</small>}{isPhotoUrl(form.photo_url)&&<ItemPhoto className="preview" src={form.photo_url} alt="물품사진 미리보기" width={160} height={110}/>}</div>
     </div></div><div className="modal-foot">{editing&&<button className="btn danger" onClick={remove}><Trash2 size={15}/> 삭제</button>}<div style={{flex:1}}/><button className="btn" onClick={close}>취소</button><button className="btn primary" disabled={saving||uploading} onClick={save}>{saving?"저장 중...":"저장"}</button></div>
   </div></div>;
 }

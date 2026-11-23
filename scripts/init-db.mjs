@@ -32,6 +32,8 @@ await sql`
 `;
 const priceMigration = await readFile(new URL("../database/migrations/001-purchase-price-text.sql", import.meta.url), "utf8");
 await sql.query(priceMigration, []);
+const fieldNotes = await readFile(new URL("../database/migrations/002-item-field-notes.sql", import.meta.url), "utf8");
+await sql.query(fieldNotes, []);
 await sql`CREATE INDEX IF NOT EXISTS idx_inventory_items_org ON inventory_items (organization)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_inventory_items_name ON inventory_items (item_name)`;
 console.log("inventory_items 테이블 준비 완료");

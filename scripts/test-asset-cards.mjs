@@ -114,6 +114,19 @@ for (const [index, expected] of ["-", "=1+1", 123.75, 0, -10, null].entries()) {
     }
   }
 }
+const noteChunks = [];
+const notes = new cards.AssetCardWorkbook(template, { write: async bytes => noteChunks.push(bytes) });
+await notes.add({ ...sample, acquired_date: "2020-01-01 이전", useful_life_years: "미상" }, null);
+await notes.add({ ...sample, management_no: "CBGC-002", acquired_date: "미상" }, null);
+await notes.finish();
+const noteCards = new ExcelJS.Workbook();
+await noteCards.xlsx.load(Buffer.concat(noteChunks));
+const noteCard = noteCards.getWorksheet("CB-1");
+assert.equal(noteCard.getCell("C7").value, "2020-01-01 이전");
+assert.equal(noteCard.getCell("C9").value, "미상");
+assert.equal(noteCard.getCell("G32").value, null);
+assert.equal(noteCard.getCell("C32").result || "", "");
+assert.equal(noteCards.getWorksheet("CB-2").getCell("G32").value, null);
 const smaller=[];const fitted=new cards.AssetCardWorkbook(template,{write:async b=>smaller.push(b)});
 await fitted.add({...sample,useful_life_years:20},null);await fitted.finish();
 const smallZip=await JSZip.loadAsync(Buffer.concat(smaller));

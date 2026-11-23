@@ -6,9 +6,9 @@ export function koreaToday(now = new Date()): string {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-export function usefulLifeEnd(acquired: string | null | undefined, years: number | null | undefined): string | null {
-  if (!acquired || years == null || !Number.isInteger(years) || years < 0) return null;
-  const match = acquired.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+export function usefulLifeEnd(acquired: string | null | undefined, years: number | string | null | undefined): string | null {
+  if (!acquired || typeof years !== "number" || !Number.isInteger(years) || years < 0) return null;
+  const match = acquired.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
   const [, y, m, d] = match.map(Number);
   const initial = new Date(Date.UTC(y, m - 1, d));
@@ -18,7 +18,7 @@ export function usefulLifeEnd(acquired: string | null | undefined, years: number
   return `${String(y + years).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
 }
 
-export function hasUsefulLifeExpired(acquired: string | null | undefined, years: number | null | undefined, today = koreaToday()): boolean {
+export function hasUsefulLifeExpired(acquired: string | null | undefined, years: number | string | null | undefined, today = koreaToday()): boolean {
   const end = usefulLifeEnd(acquired, years);
   return end !== null && end <= today;
 }

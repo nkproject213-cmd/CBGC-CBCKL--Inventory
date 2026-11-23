@@ -11,15 +11,16 @@ export type InventoryItem = {
   item_name: string;
   model_name: string | null;
   purchase_price: number | string | null;
-  useful_life_years: number | null;
+  useful_life_years: number | string | null;
   storage_location: string | null;
   accessories: string | null;
   specification: string | null;
   classification_no: string | null;
   identification_no: string | null;
   photo_url: string | null;
+  photo_url_text?: string | null;
   unit: string | null;
-  quantity: number | null;
+  quantity: number | string | null;
   item_status: string | null;
   life_expiry_auto?: boolean;
   status_before_life_expiry?: string | null;
