@@ -44,6 +44,10 @@ const escaped = renderQrLabelDocument('CBGC', [{ ...item, item_name: '<script>al
 assert(escaped.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 assert(escaped.includes('A&quot;B'));
 const base = { organization: 'CBGC', management_no: 'TEST', item_type: 'PC', item_name: '테스트' };
+for (const item_type of [undefined, null, '', '   ']) {
+  assert.equal(itemSchema.parse({ ...base, item_type }).item_type, '');
+}
+assert.equal(itemSchema.parse({ ...base, item_type: '  PC  ' }).item_type, 'PC');
 assert.equal(itemSchema.parse(base).quantity, null);
 assert.equal(itemSchema.parse({ ...base, quantity: 0 }).quantity, 0);
 assert.equal(itemSchema.parse({ ...base, quantity: '1,500' }).quantity, 1500);

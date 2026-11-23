@@ -75,7 +75,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     if (target) { autoEditDone.current = true; openEdit(target); }
   }, [items, loading]);
 
-  const allTypes = useMemo(() => [...new Set(items.map(i => i.item_type))].sort(), [items]);
+  const allTypes = useMemo(() => [...new Set(items.map(i => i.item_type).filter(t => t?.trim()))].sort(), [items]);
   const expiredCount = useMemo(() => items.filter(i => i.item_status === EXPIRED_STATUS).length, [items]);
   const sortedItems = useMemo(() => {
     const visible = expiredOnly ? items.filter(i => i.item_status === EXPIRED_STATUS) : items;
@@ -90,7 +90,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   function openNew() { setEditing(null); setForm(emptyForm(org)); }
   function openEdit(i: InventoryItem) {
     setEditing(i);
-    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type, acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, model_name:i.model_name||"", purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:(i.life_expiry_auto ? i.status_before_life_expiry : i.item_status)||"" });
+    setForm({ organization:i.organization, manager_main:i.manager_main||"", manager_sub:i.manager_sub||"", management_no:i.management_no, item_type:i.item_type || "", acquired_date:i.acquired_date?.slice(0,10)||"", item_name:i.item_name, model_name:i.model_name||"", purchase_price:i.purchase_price == null ? "" : String(i.purchase_price), useful_life_years:i.useful_life_years == null ? "" : String(i.useful_life_years), storage_location:i.storage_location||"", accessories:i.accessories||"", specification:i.specification||"", classification_no:i.classification_no||"", identification_no:i.identification_no||"", photo_url:i.photo_url||"", unit:i.unit||"", quantity:i.quantity == null ? "" : String(i.quantity), item_status:(i.life_expiry_auto ? i.status_before_life_expiry : i.item_status)||"" });
   }
   function field<K extends keyof Form>(key: K, value: Form[K]) { setForm(p => ({...p,[key]:value})); }
   async function uploadPhoto(file?: File) {
@@ -105,7 +105,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     finally { setUploading(false); }
   }
   async function save() {
-    if (!form.management_no.trim() || !form.item_type.trim() || !form.item_name.trim()) { alert("관리번호, 물품유형, 품명은 필수입니다."); return; }
+    if (!form.management_no.trim() || !form.item_name.trim()) { alert("관리번호와 품명은 필수입니다."); return; }
     const quantity = form.quantity.trim() === "" ? null : Number(form.quantity);
     if (quantity !== null && (!Number.isInteger(quantity) || quantity < 0 || quantity > 2147483647)) { alert("수량은 0 이상의 정수로 입력해 주세요."); return; }
     const years = form.useful_life_years.trim() === "" ? null : Number(form.useful_life_years);
@@ -141,7 +141,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   async function uploadExcel(file?: File) {
     if (!file || excelUploading) return;
     if (!file.name.toLowerCase().endsWith(".xlsx") || file.size > 4*1024*1024) { alert("4MB 이하의 XLSX 파일을 선택해 주세요."); if(excelInputRef.current)excelInputRef.current.value=""; return; }
-    if (!confirm(`${org} 물품대장에 엑셀을 반영하시겠습니까?\n\n같은 관리번호: 입력한 값만 수정\n빈칸·없는 열·엑셀에 없는 물품: 기존 내용 유지\n새 관리번호: 품명·물품유형이 있으면 신규 등록\n취득일자·내용연수에 따라 경과 상태는 자동 반영`)) { if(excelInputRef.current)excelInputRef.current.value=""; return; }
+    if (!confirm(`${org} 물품대장에 엑셀을 반영하시겠습니까?\n\n같은 관리번호: 입력한 값만 수정\n빈칸·없는 열·엑셀에 없는 물품: 기존 내용 유지\n새 관리번호: 품명만 있으면 신규 등록\n취득일자·내용연수에 따라 경과 상태는 자동 반영`)) { if(excelInputRef.current)excelInputRef.current.value=""; return; }
     setExcelUploading(true);
     try {
       const fd = new FormData(); fd.append("file",file); fd.append("organization",org);
@@ -210,14 +210,14 @@ function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSele
   const selectable=Boolean(!compact&&selectedIds&&onToggleSelected&&onToggleAll), allSelected=selectable&&items.every(i=>selectedIds?.has(i.id));
   return <div className="table-wrap"><table><thead><tr>{selectable&&<th style={{width:42,textAlign:"center"}}><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allSelected} onChange={e=>onToggleAll?.(e.target.checked)}/></th>}<th>사진</th><th>관리번호</th><th>품명</th><th>물품유형</th>{!compact&&<><th>규격</th><th>취득일자</th><th>상태</th></>}<th>보관장소</th><th>관리책임자(정)</th>{!compact&&<th>관리</th>}</tr></thead><tbody>{items.map(i=><tr key={i.id}>
     {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} checked={selectedIds?.has(i.id)||false} onChange={()=>onToggleSelected?.(i.id)}/></td>}
-    <td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name}</strong></td><td>{i.item_type}</td>
+    <td>{i.photo_url?<Image className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name}</strong></td><td>{i.item_type || "-"}</td>
     {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date?.slice(0,10)||"-"}</td><td><span style={i.item_status===EXPIRED_STATUS?{fontWeight:700,color:"#b42318",whiteSpace:"nowrap"}:undefined}>{i.item_status||"-"}</span></td></>}
     <td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>{!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank" rel="noreferrer"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}
   </tr>)}</tbody></table></div>;
 }
 function ItemModal({form,field,editing,close,save,remove,saving,uploading,uploadPhoto}:{form:Form;field:<K extends keyof Form>(key:K,value:Form[K])=>void;editing:InventoryItem|null;close:()=>void;save:()=>void;remove:()=>void;saving:boolean;uploading:boolean;uploadPhoto:(f?:File)=>void}) {
   const fields:Array<[keyof Form,string,string?]>=[
-    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형 *"],["acquired_date","취득일자","date"],["item_name","품명 *"],["model_name","모델명"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가","number"],["useful_life_years","내용연수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
+    ["manager_main","관리책임자(정)"],["manager_sub","관리책임자(부)"],["management_no","관리번호 *"],["item_type","물품유형"],["acquired_date","취득일자","date"],["item_name","품명 *"],["model_name","모델명"],["unit","단위"],["quantity","수량","number"],["item_status","상태"],["purchase_price","구매단가","number"],["useful_life_years","내용연수","number"],["storage_location","위치(보관장소)"],["specification","규격"],["classification_no","물품분류번호"],["identification_no","물품식별번호"]
   ];
   const modified=editing?new Date(editing.updated_at):null;
   const years=form.useful_life_years.trim()===""?null:Number(form.useful_life_years);

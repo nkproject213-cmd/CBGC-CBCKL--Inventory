@@ -25,7 +25,9 @@ let plan = parse([['관리번호','위치','물품사진 URL','수량'],[key,'�
 assert.deepEqual(plan.updates[0].patch, { storage_location:'새 장소', quantity:0 });
 assert.equal(plan.errors.length,0);
 assert.equal(parse([['관리번호'],[key]]).updates.length,1);
-assert.equal(parse([['관리번호','품명'],['NEW','신규']]).errors.length,1);
+assert.deepEqual(parse([['관리번호','품명'],['NEW','신규']]).creates[0].patch,{item_name:'신규'});
+assert.deepEqual(parse([['관리번호','품명','물품유형'],['NEW','신규','   ']]).creates[0].patch,{item_name:'신규'});
+assert.match(parse([['관리번호','물품유형'],['NEW','PC']]).errors[0],/품명/);
 assert.equal(parse([['관리번호','품명','물품유형'],['NEW','신규','PC']]).creates.length,1);
 assert.deepEqual(parse([['관리번호','품명','물품유형','관리책임자 (부)'],[key,'','   ','부 담당']]).updates[0].patch, {manager_sub:'부 담당'});
 for (const invalid of ['wrong', -1, 1.2, '1,2,3']) assert.equal(parse([['관리번호','수량'],[key,invalid]]).errors.length,1);
@@ -60,7 +62,7 @@ async function query(sql,[org,json]) {
     const k=org+'|'+value.management_no, before=db.get(k);
     if(sql===INSERT_IMPORT_SQL) {
       if(before) return [];
-      db.set(k,{...value,organization:org,id:'new-id',public_id:'new-qr',updated_at:'new'});
+      db.set(k,{item_type:'',...value,organization:org,id:'new-id',public_id:'new-qr',updated_at:'new'});
       return [{management_no:value.management_no,action:'created'}];
     }
     assert.equal(sql,UPDATE_IMPORT_SQL);
@@ -80,10 +82,13 @@ assert.deepEqual(db.get('CBGC|OTHER'),{...original,management_no:'OTHER'});
 result=await executeImport(plan,'CBGC',query); assert.equal(result.unchanged,1); assert.equal(result.updated,0);
 result=await executeImport(parse([['관리번호'],[key]]),'CBGC',query); assert.equal(result.unchanged,1);
 result=await executeImport(parse([['관리번호','품명','물품유형'],['NEW','신규','PC']]),'CBGC',query); assert.equal(result.created,1);
-// Concurrent insert is handled as a partial update, not delete-and-recreate.
-plan=parse([['관리번호','품명','물품유형'],['RACE','수정','PC']]);
+result=await executeImport(parse([['관리번호','품명'],['UNTYPED','새 물품']]),'CBGC',query);
+assert.equal(result.created,1); assert.equal(db.get('CBGC|UNTYPED').item_type,'');
+// A type supplied by a concurrent insert must survive an import without a type.
+plan=parse([['관리번호','품명','물품유형'],['RACE','수정','']]);
 db.set('CBGC|RACE',{...original,management_no:'RACE'});
 result=await executeImport(plan,'CBGC',query); assert.equal(result.updated,1); assert.equal(db.get('CBGC|RACE').public_id,'keep-qr'); assert.equal(db.get('CBGC|RACE').photo_url,original.photo_url);
+assert.equal(db.get('CBGC|RACE').item_type,original.item_type);
 // Another editor's change to an absent column is preserved at execution time.
 plan=parse([['관리번호','위치'],[key,'장소3']]);
 db.get('CBGC|'+key).manager_main='동시 수정';
@@ -93,6 +98,7 @@ calls=0; result=await executeImport({updates:[],creates:many,errors:[],skipped:0
 assert.equal(result.created,1500); assert.equal(calls,30);
 assert(UPDATE_IMPORT_SQL.includes('i.organization = $1 AND i.management_no = p.management_no'));
 assert(UPDATE_IMPORT_SQL.includes('IS DISTINCT FROM'));
+assert(INSERT_IMPORT_SQL.includes("COALESCE(p.item_type, '')"));
 assert(!/\bDELETE\b|\bTRUNCATE\b/i.test(UPDATE_IMPORT_SQL+INSERT_IMPORT_SQL));
 for(const key of Object.values(IMPORT_COLUMNS)) assert(UPDATE_IMPORT_SQL.includes(`COALESCE(p.${key}, i.${key})`));
 
@@ -101,7 +107,10 @@ if(process.env.IMPORT_NATIVE_TEST!=='1') {
   const workbook=new ExcelJS.Workbook(); const ws=workbook.addWorksheet('물품업로드');
   ws.addRow(['관리번호','위치','수량','취득일자','물품사진URL']);
   ws.addRow(['0007','회의실',0,new Date('2026-10-29T00:00:00Z'),'']);
+  const withoutType=workbook.addWorksheet('유형 생략');
+  withoutType.addRow(['관리번호','품명']); withoutType.addRow(['NEW','새 물품']);
   const loaded=new ExcelJS.Workbook(); await loaded.xlsx.load(await workbook.xlsx.writeBuffer());
+  assert.deepEqual(planImport(loaded.getWorksheet('유형 생략'),existing).creates[0].patch,{item_name:'새 물품'});
   const roundtrip=planImport(loaded.getWorksheet('물품업로드'),existing);
   assert.deepEqual(roundtrip.updates[0].patch,{acquired_date:'2026-10-29',storage_location:'회의실',quantity:0});
 }

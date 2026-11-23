@@ -130,7 +130,7 @@ export function planImport(sheet: ExcelJS.Worksheet, existing: ReadonlySet<strin
       }
       if (existing.has(management_no)) plan.updates.push({ row, management_no, patch });
       else {
-        if (!patch.item_type || !patch.item_name) throw new Error("신규 관리번호입니다. 신규 등록에는 물품유형과 품명이 필요합니다.");
+        if (!patch.item_name) throw new Error("신규 물품을 등록하려면 품명을 입력해 주세요.");
         plan.creates.push({ row, management_no, patch });
       }
     } catch (e) { plan.errors.push(`${row}행: ${e instanceof Error ? e.message : "입력값을 확인해 주세요."}`); }
@@ -158,10 +158,12 @@ SELECT p.management_no,
        THEN 'unchanged' ELSE 'missing' END AS action
 FROM incoming AS p LEFT JOIN changed AS c ON c.management_no = p.management_no`;
 
+// Only new rows need a storage default. Keep the patch sparse for conflict updates.
+const insertValues = KEYS.map(key => key === "item_type" ? "COALESCE(p.item_type, '')" : `p.${key}`);
 export const INSERT_IMPORT_SQL = `
 WITH incoming AS (SELECT * FROM jsonb_populate_recordset(NULL::inventory_items, $2::jsonb))
 INSERT INTO inventory_items (id, public_id, organization, management_no, ${KEYS.join(", ")})
-SELECT gen_random_uuid(), gen_random_uuid(), $1, p.management_no, ${KEYS.map(key => `p.${key}`).join(", ")} FROM incoming AS p
+SELECT gen_random_uuid(), gen_random_uuid(), $1, p.management_no, ${insertValues.join(", ")} FROM incoming AS p
 ON CONFLICT (organization, management_no) DO NOTHING
 RETURNING management_no, 'created'::text AS action`;
 

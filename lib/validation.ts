@@ -27,7 +27,7 @@ export const itemSchema = z.object({
   manager_main: nullableText,
   manager_sub: nullableText,
   management_no: z.string().trim().min(1, "관리번호는 필수입니다."),
-  item_type: z.string().trim().min(1, "물품유형은 필수입니다."),
+  item_type: nullableText.transform(value => value ?? ""),
   acquired_date: nullableText,
   item_name: z.string().trim().min(1, "품명은 필수입니다."),
   model_name: nullableText,
