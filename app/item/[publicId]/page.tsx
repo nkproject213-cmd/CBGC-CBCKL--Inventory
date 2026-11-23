@@ -25,7 +25,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ pub
         <header className="public-head"><h1>{item.organization} 물품정보</h1><p>QR코드를 통해 확인하는 공개 물품정보입니다.</p></header>
         <section className="public-card">
           <div className="public-photo">
-            {item.photo_url ? <Image src={item.photo_url} alt={`${item.item_name} 사진`} fill sizes="(max-width: 760px) 100vw, 760px" priority /> : <div className="no-photo">NO IMAGE</div>}
+            {item.photo_url ? <Image src={item.photo_url} alt={`${item.item_name || item.management_no} 사진`} fill sizes="(max-width: 760px) 100vw, 760px" priority /> : <div className="no-photo">NO IMAGE</div>}
           </div>
           <div className="info-list">
             {rows.map(([label, value]) => <div className="info-row" key={label}><b>{label}</b><span>{value || "-"}</span></div>)}

@@ -48,6 +48,20 @@ for (const item_type of [undefined, null, '', '   ']) {
   assert.equal(itemSchema.parse({ ...base, item_type }).item_type, '');
 }
 assert.equal(itemSchema.parse({ ...base, item_type: '  PC  ' }).item_type, 'PC');
+const minimum = { organization: 'CBGC', management_no: 'TEST' };
+const normalized = itemSchema.parse(minimum);
+assert.equal(normalized.item_name, '');
+assert.equal(normalized.item_type, '');
+assert.equal(normalized.purchase_price, null);
+for (const price of [0, '0', ' 0 ']) {
+  assert.equal(itemSchema.parse({ ...minimum, purchase_price: price }).purchase_price, 0);
+}
+for (const empty of [undefined, null, '', '  ']) {
+  const parsed = itemSchema.parse({ ...minimum, item_name: empty, purchase_price: empty });
+  assert.equal(parsed.item_name, '');
+  assert.equal(parsed.purchase_price, null);
+  assert.equal(itemSchema.safeParse({ ...minimum, management_no: empty }).success, false);
+}
 assert.equal(itemSchema.parse(base).quantity, null);
 assert.equal(itemSchema.parse({ ...base, quantity: 0 }).quantity, 0);
 assert.equal(itemSchema.parse({ ...base, quantity: '1,500' }).quantity, 1500);

@@ -7,7 +7,9 @@ const nullableText = z.union([z.string().trim(), z.null()]).optional().transform
   return v;
 });
 
-const nullableNumber = z.union([z.number(), z.string(), z.null()]).optional().transform((v) => {
+const textOrEmpty = nullableText.transform(value => value ?? "");
+
+const nullableNumber = z.union([z.number(), z.string().trim(), z.null()]).optional().transform((v) => {
   if (v == null || v === "") return null;
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
@@ -26,10 +28,10 @@ export const itemSchema = z.object({
   organization: organizationSchema,
   manager_main: nullableText,
   manager_sub: nullableText,
-  management_no: z.string().trim().min(1, "관리번호는 필수입니다."),
-  item_type: nullableText.transform(value => value ?? ""),
+  management_no: z.string("관리번호는 필수입니다.").trim().min(1, "관리번호는 필수입니다."),
+  item_type: textOrEmpty,
   acquired_date: nullableText,
-  item_name: z.string().trim().min(1, "품명은 필수입니다."),
+  item_name: textOrEmpty,
   model_name: nullableText,
   purchase_price: nullableNumber,
   useful_life_years: nullableNumber,

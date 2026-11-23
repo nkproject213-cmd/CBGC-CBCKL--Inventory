@@ -128,11 +128,8 @@ export function planImport(sheet: ExcelJS.Worksheet, existing: ReadonlySet<strin
         const value = values.get(header) ?? null;
         if (hasValue(value)) patch[key] = convert(value, header, key, date1904);
       }
-      if (existing.has(management_no)) plan.updates.push({ row, management_no, patch });
-      else {
-        if (!patch.item_name) throw new Error("신규 물품을 등록하려면 품명을 입력해 주세요.");
-        plan.creates.push({ row, management_no, patch });
-      }
+      const rows = existing.has(management_no) ? plan.updates : plan.creates;
+      rows.push({ row, management_no, patch });
     } catch (e) { plan.errors.push(`${row}행: ${e instanceof Error ? e.message : "입력값을 확인해 주세요."}`); }
   }
   return plan;
@@ -159,7 +156,9 @@ SELECT p.management_no,
 FROM incoming AS p LEFT JOIN changed AS c ON c.management_no = p.management_no`;
 
 // Only new rows need a storage default. Keep the patch sparse for conflict updates.
-const insertValues = KEYS.map(key => key === "item_type" ? "COALESCE(p.item_type, '')" : `p.${key}`);
+const insertValues = KEYS.map(key =>
+  key === "item_name" || key === "item_type" ? `COALESCE(p.${key}, '')` : `p.${key}`
+);
 export const INSERT_IMPORT_SQL = `
 WITH incoming AS (SELECT * FROM jsonb_populate_recordset(NULL::inventory_items, $2::jsonb))
 INSERT INTO inventory_items (id, public_id, organization, management_no, ${KEYS.join(", ")})

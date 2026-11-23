@@ -36,7 +36,7 @@ let plan = engine.planImport(sheet(['관리번호', '모델명'], [['A', ' SM-S9
 assert.deepEqual(plan.updates[0].patch, { model_name: 'SM-S938' });
 assert.deepEqual(plan.updates[1].patch, {});
 assert.deepEqual(engine.planImport(sheet(['관리번호', '보관장소'], [['A', '새 장소']]), existing).updates[0].patch, { storage_location: '새 장소' });
-assert.equal(engine.planImport(sheet(['관리번호', '모델명'], [['NEW', 'M1']]), existing).errors.length, 1);
+assert.deepEqual(engine.planImport(sheet(['관리번호', '모델명'], [['NEW', 'M1']]), existing).creates[0].patch, { model_name: 'M1' });
 assert.equal(engine.planImport(sheet(['관리번호', '품명', '물품유형', '모델명'], [['NEW', '노트북', 'PC', '0012']]), existing).creates[0].patch.model_name, '0012');
 const padded = sheet(['관리번호', '모델명'], [['A', 12]]);
 padded.getCell('B2').numFmt = '0000';
@@ -141,7 +141,7 @@ const form = read('components/AdminConsole.tsx');
 assert(form.includes('["model_name","모델명"]'));
 assert(form.includes('model_name:i.model_name||""'));
 assert(form.includes('model_name:form.model_name.trim()||null'));
-assert(form.includes('["item_name","품명 *"]')); assert(!form.includes('제품명'));
+assert(form.includes('["item_name","품명"]')); assert(!form.includes('제품명'));
 const db = read('lib/db.ts');
 assert(db.includes('ADD COLUMN IF NOT EXISTS model_name TEXT'));
 assert(db.includes('item_name, model_name, storage_location'));

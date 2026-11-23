@@ -27,7 +27,9 @@ assert.equal(plan.errors.length,0);
 assert.equal(parse([['관리번호'],[key]]).updates.length,1);
 assert.deepEqual(parse([['관리번호','품명'],['NEW','신규']]).creates[0].patch,{item_name:'신규'});
 assert.deepEqual(parse([['관리번호','품명','물품유형'],['NEW','신규','   ']]).creates[0].patch,{item_name:'신규'});
-assert.match(parse([['관리번호','물품유형'],['NEW','PC']]).errors[0],/품명/);
+assert.deepEqual(parse([['관리번호'],['NEW']]).creates[0].patch,{});
+assert.deepEqual(parse([['관리번호','품명','물품유형'],['NEW',' ','PC']]).creates[0].patch,{item_type:'PC'});
+assert.match(parse([['관리번호','품명'],['','새 물품']]).errors[0],/관리번호/);
 assert.equal(parse([['관리번호','품명','물품유형'],['NEW','신규','PC']]).creates.length,1);
 assert.deepEqual(parse([['관리번호','품명','물품유형','관리책임자 (부)'],[key,'','   ','부 담당']]).updates[0].patch, {manager_sub:'부 담당'});
 for (const invalid of ['wrong', -1, 1.2, '1,2,3']) assert.equal(parse([['관리번호','수량'],[key,invalid]]).errors.length,1);
@@ -52,7 +54,7 @@ assert.throws(()=>importDate('2025-02-29')); assert.throws(()=>importDate('2025-
 
 // The fake query adapter runs the same parameterized patch payloads and models
 // current-value COALESCE semantics. No production database is written by tests.
-const original = {organization:'CBGC',management_no:key,id:'keep-id',public_id:'keep-qr',item_name:'원래 품명',item_type:'PC',photo_url:'https://example.com/photo.jpg',specification:'원래 규격',quantity:5,storage_location:'이전',updated_at:'old',manager_main:'정',manager_sub:'부'};
+const original = {organization:'CBGC',management_no:key,id:'keep-id',public_id:'keep-qr',item_name:'원래 품명',item_type:'PC',photo_url:'https://example.com/photo.jpg',specification:'원래 규격',quantity:5,purchase_price:4500,storage_location:'이전',updated_at:'old',manager_main:'정',manager_sub:'부'};
 const db = new Map([['CBGC|'+key,{...original}],['CBCKL|'+key,{...original,organization:'CBCKL'}],['CBGC|OTHER',{...original,management_no:'OTHER'}]]);
 let calls=0;
 async function query(sql,[org,json]) {
@@ -62,7 +64,7 @@ async function query(sql,[org,json]) {
     const k=org+'|'+value.management_no, before=db.get(k);
     if(sql===INSERT_IMPORT_SQL) {
       if(before) return [];
-      db.set(k,{item_type:'',...value,organization:org,id:'new-id',public_id:'new-qr',updated_at:'new'});
+      db.set(k,{item_name:'',item_type:'',purchase_price:null,...value,organization:org,id:'new-id',public_id:'new-qr',updated_at:'new'});
       return [{management_no:value.management_no,action:'created'}];
     }
     assert.equal(sql,UPDATE_IMPORT_SQL);
@@ -84,11 +86,23 @@ result=await executeImport(parse([['관리번호'],[key]]),'CBGC',query); assert
 result=await executeImport(parse([['관리번호','품명','물품유형'],['NEW','신규','PC']]),'CBGC',query); assert.equal(result.created,1);
 result=await executeImport(parse([['관리번호','품명'],['UNTYPED','새 물품']]),'CBGC',query);
 assert.equal(result.created,1); assert.equal(db.get('CBGC|UNTYPED').item_type,'');
-// A type supplied by a concurrent insert must survive an import without a type.
-plan=parse([['관리번호','품명','물품유형'],['RACE','수정','']]);
+result=await executeImport(parse([['관리번호'],['ONLY-ID']]),'CBGC',query);
+assert.equal(result.created,1); assert.equal(db.get('CBGC|ONLY-ID').item_name,''); assert.equal(db.get('CBGC|ONLY-ID').purchase_price,null);
+result=await executeImport(parse([['관리번호','구매단가'],[key,' ']]),'CBGC',query);
+assert.equal(result.unchanged,1); assert.equal(db.get('CBGC|'+key).purchase_price,4500);
+for (const zero of [0,'0']) {
+  const newKey='ZERO-'+typeof zero;
+  result=await executeImport(parse([['관리번호','구매단가'],[newKey,zero]]),'CBGC',query);
+  assert.equal(result.created,1); assert.equal(db.get('CBGC|'+newKey).purchase_price,0);
+  db.get('CBGC|'+key).purchase_price=4500;
+  result=await executeImport(parse([['관리번호','구매단가'],[key,zero]]),'CBGC',query);
+  assert.equal(result.updated,1); assert.equal(db.get('CBGC|'+key).purchase_price,0);
+}
+// A name and type supplied by a concurrent insert must survive a sparse import.
+plan=parse([['관리번호','품명','물품유형','구매단가'],['RACE','','',0]]);
 db.set('CBGC|RACE',{...original,management_no:'RACE'});
 result=await executeImport(plan,'CBGC',query); assert.equal(result.updated,1); assert.equal(db.get('CBGC|RACE').public_id,'keep-qr'); assert.equal(db.get('CBGC|RACE').photo_url,original.photo_url);
-assert.equal(db.get('CBGC|RACE').item_type,original.item_type);
+assert.equal(db.get('CBGC|RACE').item_type,original.item_type); assert.equal(db.get('CBGC|RACE').item_name,original.item_name); assert.equal(db.get('CBGC|RACE').purchase_price,0);
 // Another editor's change to an absent column is preserved at execution time.
 plan=parse([['관리번호','위치'],[key,'장소3']]);
 db.get('CBGC|'+key).manager_main='동시 수정';
@@ -98,7 +112,7 @@ calls=0; result=await executeImport({updates:[],creates:many,errors:[],skipped:0
 assert.equal(result.created,1500); assert.equal(calls,30);
 assert(UPDATE_IMPORT_SQL.includes('i.organization = $1 AND i.management_no = p.management_no'));
 assert(UPDATE_IMPORT_SQL.includes('IS DISTINCT FROM'));
-assert(INSERT_IMPORT_SQL.includes("COALESCE(p.item_type, '')"));
+assert(INSERT_IMPORT_SQL.includes("COALESCE(p.item_type, '')")); assert(INSERT_IMPORT_SQL.includes("COALESCE(p.item_name, '')"));
 assert(!/\bDELETE\b|\bTRUNCATE\b/i.test(UPDATE_IMPORT_SQL+INSERT_IMPORT_SQL));
 for(const key of Object.values(IMPORT_COLUMNS)) assert(UPDATE_IMPORT_SQL.includes(`COALESCE(p.${key}, i.${key})`));
 
@@ -109,8 +123,15 @@ if(process.env.IMPORT_NATIVE_TEST!=='1') {
   ws.addRow(['0007','회의실',0,new Date('2026-10-29T00:00:00Z'),'']);
   const withoutType=workbook.addWorksheet('유형 생략');
   withoutType.addRow(['관리번호','품명']); withoutType.addRow(['NEW','새 물품']);
+  const ids=workbook.addWorksheet('번호만'); ids.addRow(['관리번호']); ids.addRow(['ONLY-ID']);
+  const prices=workbook.addWorksheet('구매단가'); prices.addRow(['관리번호','구매단가']);
+  prices.addRow(['N',0]); prices.addRow(['T','0']); prices.addRow([key,'']);
   const loaded=new ExcelJS.Workbook(); await loaded.xlsx.load(await workbook.xlsx.writeBuffer());
   assert.deepEqual(planImport(loaded.getWorksheet('유형 생략'),existing).creates[0].patch,{item_name:'새 물품'});
+  assert.deepEqual(planImport(loaded.getWorksheet('번호만'),existing).creates[0].patch,{});
+  const pricePlan=planImport(loaded.getWorksheet('구매단가'),existing);
+  assert.deepEqual(pricePlan.creates.map(row=>row.patch.purchase_price),[0,0]);
+  assert.deepEqual(pricePlan.updates[0].patch,{});
   const roundtrip=planImport(loaded.getWorksheet('물품업로드'),existing);
   assert.deepEqual(roundtrip.updates[0].patch,{acquired_date:'2026-10-29',storage_location:'회의실',quantity:0});
 }
