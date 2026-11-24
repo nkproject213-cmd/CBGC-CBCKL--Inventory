@@ -28,6 +28,7 @@ function sheet(headers, rows) {
 }
 const price = loadTs('lib/purchase-price.ts');
 const fields = loadTs('lib/flexible-fields.ts');
+const sharedPhotos = loadTs('lib/shared-photo.ts', { './flexible-fields': fields });
 const fieldDependencies = { './purchase-price': price, './flexible-fields': fields };
 const engine = loadTs('lib/excel-import.ts', fieldDependencies);
 const validation = loadTs('lib/validation.ts', fieldDependencies);
@@ -150,6 +151,7 @@ const patchRoute = loadTs('app/api/items/[id]/route.ts', {
   'next/server': { NextResponse }, '@vercel/blob': { del: async () => {} }, '@/lib/auth': auth,
   '@/lib/db': { getItem: async () => base, updateItem: async (_, data) => { savedData = data; return { ...base, ...data }; } },
   '@/lib/validation': validation,
+  '@/lib/shared-photo': sharedPhotos,
 });
 const patch = data => patchRoute.PATCH(new Request('https://example.invalid/api/items/id', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) }), { params: Promise.resolve({ id: 'id' }) });
 assert.equal((await patch({ specification: 'new' })).status, 200); assert.equal(savedData.model_name, 'SM-S938');

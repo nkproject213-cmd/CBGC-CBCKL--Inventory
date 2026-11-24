@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { isAdmin } from "@/lib/auth";
 import { deleteItem, getItem, updateItem } from "@/lib/db";
 import { itemSchema } from "@/lib/validation";
+import { isSharedPhotoUrl } from "@/lib/shared-photo";
 
 function errorResponse(error: unknown) {
   if (error instanceof ZodError) return NextResponse.json({ error: error.issues.map(issue => issue.message).join(", ") }, { status: 400 });
@@ -29,7 +30,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const payload = await request.json();
     const data = itemSchema.parse({ ...before, photo_url: before.photo_url ?? before.photo_url_text, ...payload });
     const item = await updateItem(id, data);
-    if (before.photo_url && before.photo_url !== item?.photo_url && !item?.photo_url_text && before.photo_url.includes("blob.vercel-storage.com")) del(before.photo_url).catch(console.error);
+    if (item && before.photo_url && before.photo_url !== item.photo_url && !item.photo_url_text
+      && !isSharedPhotoUrl(before.photo_url) && before.photo_url.includes("blob.vercel-storage.com")) {
+      del(before.photo_url).catch(console.error);
+    }
     return NextResponse.json({ item });
   } catch (error) { return errorResponse(error); }
 }
@@ -39,7 +43,9 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     const { id } = await params;
     const deleted = await deleteItem(id);
     if (!deleted) return NextResponse.json({ error: "물품을 찾을 수 없습니다." }, { status: 404 });
-    if (deleted.photo_url?.includes("blob.vercel-storage.com")) del(deleted.photo_url).catch(console.error);
+    if (deleted.photo_url?.includes("blob.vercel-storage.com") && !isSharedPhotoUrl(deleted.photo_url)) {
+      del(deleted.photo_url).catch(console.error);
+    }
     return NextResponse.json({ ok: true });
   } catch (error) { return errorResponse(error); }
 }

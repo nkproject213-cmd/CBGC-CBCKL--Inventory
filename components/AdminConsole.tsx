@@ -6,6 +6,7 @@ import { Menu, Plus, Download, Upload, Camera, Users, LogOut, Pencil, QrCode, Ex
 import type { InventoryItem, Organization } from "@/lib/types";
 import { compressItemPhoto } from "@/lib/item-photo";
 import PhotoArchiveButton from "@/components/PhotoArchiveButton";
+import BulkPhotoButton from "@/components/BulkPhotoButton";
 import { isStoredDate, isPhotoUrl, normalizeAcquiredDate, normalizeCount } from "@/lib/flexible-fields";
 import { EXPIRED_STATUS, koreaToday, usefulLifeEnd } from "@/lib/lifecycle";
 
@@ -190,6 +191,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
             <select className="select" style={{maxWidth:170}} value={sortKey} onChange={e=>setSortKey(e.target.value as SortKey)}><option value="default">기본 정렬</option><option value="management_no">관리번호</option><option value="item_name">품명</option><option value="item_type">물품유형</option><option value="acquired_date">취득일자</option><option value="storage_location">보관장소</option><option value="manager_main">관리책임자(정)</option><option value="updated_at">수정일</option></select>
             <select className="select" style={{maxWidth:130}} value={sortDirection} onChange={e=>setSortDirection(e.target.value as SortDirection)} disabled={sortKey==="default"}><option value="asc">오름차순</option><option value="desc">내림차순</option></select><div className="grow"/>
             <input ref={excelInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={e=>uploadExcel(e.target.files?.[0])}/><a className="btn" href="/api/items/import-template"><Download size={15}/> 업로드 양식</a><button className="btn" disabled={excelUploading} onClick={()=>excelInputRef.current?.click()}><Upload size={15}/>{excelUploading?" 업로드 중...":" 엑셀 업로드"}</button><button className="btn" onClick={excel}><Download size={15}/> Excel 다운로드</button><PhotoArchiveButton org={org}/>
+            <BulkPhotoButton key={org} org={org} selectedItems={sortedItems.filter(item=>selectedIds.has(item.id))} disabled={loading||deletingSelected||excelUploading} onSaved={load}/>
             <button className="btn danger" disabled={deletingSelected||loading||selectedIds.size===0} onClick={deleteSelectedItems}><Trash2 size={15}/>{deletingSelected?" 삭제 중...":` 선택삭제 (${selectedIds.size})`}</button>
           </div><div className="toolbar" style={{borderTop:"1px solid var(--border)",gap:14}}>
             <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontWeight:700,fontSize:13}}><input type="checkbox" checked={expiredOnly} onChange={e=>setExpiredOnly(e.target.checked)}/> 내용연수 경과만 보기 ({expiredCount})</label>

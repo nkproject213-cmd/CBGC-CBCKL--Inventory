@@ -250,3 +250,33 @@ export async function deleteItemsByIdsForOrg(org: Organization, ids: string[]) {
   const rows = await sql`DELETE FROM inventory_items WHERE organization = ${org} AND id = ANY(${ids}::uuid[]) RETURNING id`;
   return normalizeRows<{ id: string }>(rows).length;
 }
+
+export async function updatePhotoForItems(org: Organization, ids: string[], photoUrl: string) {
+  const sql = sqlClient();
+  await ensureSchema(sql);
+  const rows = await sql`
+    WITH selected AS MATERIALIZED (
+      SELECT id FROM inventory_items
+      WHERE organization = ${org} AND id = ANY(${ids}::uuid[])
+      ORDER BY id
+      FOR UPDATE
+    ), changed AS (
+      UPDATE inventory_items AS i SET
+        photo_url = ${photoUrl},
+        photo_url_text = NULL,
+        updated_at = NOW()
+      FROM selected AS s
+      WHERE i.id = s.id
+        AND (SELECT COUNT(*) FROM selected) = ${ids.length}
+        AND (i.photo_url IS DISTINCT FROM ${photoUrl} OR i.photo_url_text IS NOT NULL)
+      RETURNING i.id
+    )
+    SELECT (SELECT COUNT(*)::int FROM selected) AS total,
+      (SELECT COUNT(*)::int FROM changed) AS updated
+  `;
+  const result = normalizeRows<{ total: number; updated: number }>(rows)[0];
+  // Locked selection and update share one statement, so a removed/moved item
+  // rejects the whole batch. Replays of the same photo leave timestamps intact.
+  if (result.total !== ids.length) return null;
+  return { updated: result.updated, unchanged: result.total - result.updated, total: result.total };
+}

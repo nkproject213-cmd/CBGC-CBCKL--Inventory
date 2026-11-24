@@ -3,6 +3,7 @@ import { put } from "@vercel/blob";
 import { isAdmin } from "@/lib/auth";
 import { compressStoredPhoto } from "@/lib/compress-stored-photo.mjs";
 import limits from "@/lib/photo-limits.json";
+import { SHARED_PHOTO_PREFIX } from "@/lib/shared-photo";
 
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_INPUT_BYTES = 5 * 1024 * 1024;
@@ -43,8 +44,10 @@ export async function POST(request: Request) {
       }
     }
 
+    const prefix = form.get("purpose") === "bulk-photo" ? SHARED_PHOTO_PREFIX : "inventory/";
+    const filename = upload.name.replace(/[\\/\u0000-\u001f\u007f]/g, "_");
     const blob = await put(
-      `inventory/${crypto.randomUUID()}-${upload.name}`,
+      `${prefix}${crypto.randomUUID()}-${filename}`,
       upload,
       {
         access: "public",

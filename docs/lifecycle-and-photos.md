@@ -20,3 +20,11 @@ Images are fetched directly by the browser without cookies, then stored byte-for
 Archive includes a CSV file index, failure CSV and completion notes. Missing photos are counted separately; deleted files, network/CORS errors and unsupported MIME types are reported, not silently treated as success. Cancel/disk failure aborts the current disk file; already saved fallback parts remain. Do not close the page while processing. No whole-production-photo download is performed by build tests.
 
 Build runs existing QR, Excel, model suites and test:lifecycle-photos. Tests validate anniversary boundaries, Korean midnight, leap days, empty vs zero, filtered XLSX, manifest authentication/org isolation, real 1500-entry ZIP serialization and independent JSZip CRC/extraction. Physical browser save permissions and all live photo fetches require end-to-end browser verification separately.
+
+## Apply one photo to selected items
+
+In either CBGC or CBCKL 물품관리, select the management-number rows and choose 사진 일괄 적용. The dialog lists the selected items, shows how many existing photos will be replaced, and previews the chosen JPG, PNG, or WEBP. Confirm with the item-count apply button. Select-all applies only to the currently visible, filtered list; at most 2,000 items can be updated in one request.
+
+The image is compressed to at most 250KB and uploaded once under `inventory/shared/`. All selected items reference that same file. Only `photo_url`, `photo_url_text`, and `updated_at` are changed. A single SQL statement locks and checks the whole organization-scoped selection before updating; a deleted or moved target rejects the entire batch. Replaying a successful request does not change timestamps again.
+
+Replacing or deleting one item never removes a shared photo from Blob storage, so other items retain their pictures. Unreferenced shared files are retained rather than automatically deleted. The new `test:bulk-photo` build gate covers authentication, validation, target limits, UUID normalization, conflict responses, and shared-file preservation on individual edits and deletions.
