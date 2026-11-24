@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Plus, Download, Upload, Camera, Users, LogOut, Pencil, QrCode, ExternalLink, Trash2, X } from "lucide-react";
 import type { InventoryItem, Organization } from "@/lib/types";
 import { compressItemPhoto } from "@/lib/item-photo";
+import { updateItemSelection } from "@/lib/item-selection";
 import PhotoArchiveButton from "@/components/PhotoArchiveButton";
 import BulkPhotoButton from "@/components/BulkPhotoButton";
 import { isStoredDate, isPhotoUrl, normalizeAcquiredDate, normalizeCount } from "@/lib/flexible-fields";
@@ -38,6 +39,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const [bulkManagerSaving, setBulkManagerSaving] = useState(false);
   const [excelUploading, setExcelUploading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectionAnchor = useRef<{ id: string; context: string } | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const autoEditDone = useRef(false);
@@ -45,8 +47,10 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   const loadedDay = useRef("");
   const colors = org === "CBGC" ? { primary: "#00a8a8", dark: "#008c8c" } : { primary: "#ea5b96", dark: "#cf3d7d" };
   const base = `/admin/${org.toLowerCase()}`;
+  const selectionContext = JSON.stringify([org, section, search, type, expiredOnly, sortKey, sortDirection]);
   async function load() {
     const sequence = ++loadSequence.current;
+    selectionAnchor.current = null;
     setLoading(true); setSelectedIds(new Set());
     const params = new URLSearchParams({ org }); if (search) params.set("q", search); if (type) params.set("type", type);
     try {
@@ -69,6 +73,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
   }, [org, search, type]);
   useEffect(() => { setForm(emptyForm(org)); setExpiredOnly(false); }, [org]);
   useEffect(() => { setSelectedIds(new Set()); }, [expiredOnly]);
+  useEffect(() => { selectionAnchor.current = null; }, [selectionContext]);
   useEffect(() => {
     if (autoEditDone.current || loading) return;
     const publicId = new URLSearchParams(window.location.search).get("edit");
@@ -150,8 +155,20 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     } catch(e) { alert(e instanceof Error?e.message:"엑셀 업로드에 실패했습니다."); }
     finally { setExcelUploading(false); if(excelInputRef.current)excelInputRef.current.value=""; }
   }
-  function toggleSelected(id:string) { setSelectedIds(current=>{const next=new Set(current); if(next.has(id))next.delete(id);else next.add(id);return next;}); }
-  function toggleAllVisible(checked:boolean) { setSelectedIds(checked?new Set(sortedItems.map(i=>i.id)):new Set()); }
+  function toggleSelected(id: string, shiftKey: boolean) {
+    const visibleIds = sortedItems.map(item => item.id);
+    if (!visibleIds.includes(id)) return;
+    const previousAnchor = selectionAnchor.current;
+    const anchorId = shiftKey && previousAnchor?.context === selectionContext
+      && visibleIds.includes(previousAnchor.id) ? previousAnchor.id : null;
+    // Keep the original anchor across repeated Shift clicks. Updaters stay pure.
+    if (anchorId === null) selectionAnchor.current = { id, context: selectionContext };
+    setSelectedIds(current => updateItemSelection(current, visibleIds, id, anchorId));
+  }
+  function toggleAllVisible(checked:boolean) {
+    selectionAnchor.current = null;
+    setSelectedIds(checked?new Set(sortedItems.map(i=>i.id)):new Set());
+  }
   async function deleteSelectedItems() {
     // Selection must never act on hidden items after a filter change.
     const ids=sortedItems.filter(i=>selectedIds.has(i.id)).map(i=>i.id);
@@ -196,6 +213,7 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
           </div><div className="toolbar" style={{borderTop:"1px solid var(--border)",gap:14}}>
             <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontWeight:700,fontSize:13}}><input type="checkbox" checked={expiredOnly} onChange={e=>setExpiredOnly(e.target.checked)}/> 내용연수 경과만 보기 ({expiredCount})</label>
             <span style={{fontSize:12,color:"var(--muted)"}}>현재 {sortedItems.length}개 표시 · 한국 날짜 기준 · 엑셀 다운로드에도 경과 필터 적용</span>
+            <span id="item-selection-help" style={{fontSize:12,color:"var(--muted)"}}>Shift + 클릭: 두 물품 사이 모두 선택</span>
           </div><ItemsTable items={sortedItems} loading={loading} onEdit={openEdit} selectedIds={selectedIds} onToggleSelected={toggleSelected} onToggleAll={toggleAllVisible}/></div>
         </>}
       </div>
@@ -203,12 +221,12 @@ export default function AdminConsole({ org, section }: { org: Organization; sect
     {editing!==undefined&&<ItemModal form={form} field={field} editing={editing} close={()=>setEditing(undefined)} save={save} remove={remove} saving={saving} uploading={uploading} uploadPhoto={uploadPhoto}/>}
   </div>;
 }
-function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSelected,onToggleAll}:{items:InventoryItem[];loading:boolean;onEdit:(i:InventoryItem)=>void;compact?:boolean;selectedIds?:Set<string>;onToggleSelected?:(id:string)=>void;onToggleAll?:(checked:boolean)=>void}) {
+function ItemsTable({items,loading,onEdit,compact=false,selectedIds,onToggleSelected,onToggleAll}:{items:InventoryItem[];loading:boolean;onEdit:(i:InventoryItem)=>void;compact?:boolean;selectedIds?:Set<string>;onToggleSelected?:(id:string,shiftKey:boolean)=>void;onToggleAll?:(checked:boolean)=>void}) {
   if(loading)return <div className="empty">불러오는 중...</div>;
   if(!items.length)return <div className="empty">표시할 물품이 없습니다. 검색어나 필터를 확인해 주세요.</div>;
   const selectable=Boolean(!compact&&selectedIds&&onToggleSelected&&onToggleAll), allSelected=selectable&&items.every(i=>selectedIds?.has(i.id));
   return <div className="table-wrap"><table><thead><tr>{selectable&&<th style={{width:42,textAlign:"center"}}><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allSelected} onChange={e=>onToggleAll?.(e.target.checked)}/></th>}<th>사진</th><th>관리번호</th><th>품명</th><th>물품유형</th>{!compact&&<><th>규격</th><th>취득일자</th><th>상태</th></>}<th>보관장소</th><th>관리책임자(정)</th>{!compact&&<th>관리</th>}</tr></thead><tbody>{items.map(i=><tr key={i.id}>
-    {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} checked={selectedIds?.has(i.id)||false} onChange={()=>onToggleSelected?.(i.id)}/></td>}
+    {selectable&&<td style={{textAlign:"center"}}><input type="checkbox" aria-label={`${i.management_no} 선택`} aria-describedby="item-selection-help" checked={selectedIds?.has(i.id)||false} onChange={event=>onToggleSelected?.(i.id,"shiftKey" in event.nativeEvent && event.nativeEvent.shiftKey === true)}/></td>}
     <td>{isPhotoUrl(i.photo_url)?<ItemPhoto className="thumb" src={i.photo_url} alt="" width={52} height={52}/>:<div className="thumb"/>}</td><td>{i.management_no}</td><td><strong>{i.item_name || "-"}</strong></td><td>{i.item_type || "-"}</td>
     {!compact&&<><td>{i.specification||"-"}</td><td>{i.acquired_date || "-"}</td><td><span style={i.item_status===EXPIRED_STATUS?{fontWeight:700,color:"#b42318",whiteSpace:"nowrap"}:undefined}>{i.item_status||"-"}</span></td></>}
     <td>{i.storage_location||"-"}</td><td>{i.manager_main||"-"}</td>{!compact&&<td><div className="actions"><button className="btn small" onClick={()=>onEdit(i)}><Pencil size={13}/> 수정 및 상세</button><a className="btn small" href={`/api/qr/${i.public_id}`} target="_blank" rel="noreferrer"><QrCode size={13}/> QR</a><a className="btn small" href={`/item/${i.public_id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/> 공개</a></div></td>}

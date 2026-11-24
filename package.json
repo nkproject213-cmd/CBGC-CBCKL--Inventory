@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/test-qr-print.mjs && node scripts/test-qr-layout.mjs && node scripts/test-excel-import.mjs && node scripts/test-model-name.mjs && node scripts/test-lifecycle-photos.mjs && node scripts/test-asset-cards.mjs && node scripts/test-bulk-photo.mjs && next build",
+    "build": "node scripts/test-qr-print.mjs && node scripts/test-qr-layout.mjs && node scripts/test-excel-import.mjs && node scripts/test-model-name.mjs && node scripts/test-lifecycle-photos.mjs && node scripts/test-asset-cards.mjs && node scripts/test-bulk-photo.mjs && node scripts/test-item-selection.mjs && next build",
     "test:qr-print": "node scripts/test-qr-print.mjs",
     "test:qr-layout": "node scripts/test-qr-layout.mjs",
     "test:excel-import": "node scripts/test-excel-import.mjs",
@@ -12,6 +12,7 @@
     "test:lifecycle-photos": "node scripts/test-lifecycle-photos.mjs",
     "test:asset-cards": "node scripts/test-asset-cards.mjs",
     "test:bulk-photo": "node scripts/test-bulk-photo.mjs",
+    "test:item-selection": "node scripts/test-item-selection.mjs",
     "start": "next start",
     "lint": "eslint .",
     "db:init": "node scripts/init-db.mjs",

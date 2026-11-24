@@ -28,3 +28,9 @@ In either CBGC or CBCKL 물품관리, select the management-number rows and choo
 The image is compressed to at most 250KB and uploaded once under `inventory/shared/`. All selected items reference that same file. Only `photo_url`, `photo_url_text`, and `updated_at` are changed. A single SQL statement locks and checks the whole organization-scoped selection before updating; a deleted or moved target rejects the entire batch. Replaying a successful request does not change timestamps again.
 
 Replacing or deleting one item never removes a shared photo from Blob storage, so other items retain their pictures. Unreferenced shared files are retained rather than automatically deleted. The new `test:bulk-photo` build gate covers authentication, validation, target limits, UUID normalization, conflict responses, and shared-file preservation on individual edits and deletions.
+
+## Select a range of items
+
+In 물품관리, click one row's checkbox, then hold Shift and click another row's checkbox to select the entire inclusive range in the current display order. Both directions work and previously selected items outside the range remain selected. Further Shift clicks retain the original anchor; a normal click toggles only that item and establishes a new anchor. The resulting selection is shared by photo assignment and selected-item deletion.
+
+Search, type/expiry filters, organization/section changes, sorting, select-all, and list reloads reset the anchor. A Shift click without a valid visible anchor behaves like a normal click. Filtered-out rows are never added by range selection. `test:item-selection` covers range boundaries, ordering, additive behavior, missing targets, anchor transitions, and large lists.
